@@ -41,5 +41,6 @@ if __name__ == "__main__":
     try:
         receiver.connect()
         entities = receiver.scan_entities()
+        #print(entities)
     finally:
         receiver.disconnect()

@@ -8,7 +8,7 @@ from torch_geometric.utils import to_networkx
 
 # New imports from split modules
 from graph_utils import save_graph_ml
-from graph_defs import SimpleHGNN, build_incidence_from_one_hop
+from graph_defsEXAMPLE import SimpleHGNN, build_incidence_from_one_hop
 from plotting import plot_confusion, compute_macro_f1, confusion_matrix
 
 torch.manual_seed(0)
