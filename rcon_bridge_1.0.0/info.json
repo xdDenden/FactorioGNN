@@ -1,9 +1,0 @@
-{
-  "name": "rcon_bridge",
-  "version": "1.0.0",
-  "title": "RCON Bridge",
-  "author": "Patrick",
-  "factorio_version": "2.0",
-  "description": "Sends in-game data (players, entities, etc.) to external Python via RCON.",
-  "dependencies": []
-}
