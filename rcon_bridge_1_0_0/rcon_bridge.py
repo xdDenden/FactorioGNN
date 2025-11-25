@@ -34,6 +34,21 @@ class Rcon_reciever:
         entities = json.loads(response)
 
         return entities
+    def move_to(self, x: int, y: int) -> None:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        command = self._rcon.command("/moveto x={} y={}".format(x, y))
+        return None
+    def char_info(self) -> None:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        command = self._rcon.command("/char_info")
+    def give(self, itemIndex: int, amount: int) -> None:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        command = self._rcon.command("/give itemIndex={} amount={}".format(itemIndex, amount))
+        return None
+
 
 
 if __name__ == "__main__":
@@ -41,6 +56,6 @@ if __name__ == "__main__":
     try:
         receiver.connect()
         entities = receiver.scan_entities()
-        #print(entities)
+        print(entities)
     finally:
         receiver.disconnect()

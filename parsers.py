@@ -132,5 +132,6 @@ def parse_burner_drill(t: str, kv: Dict[str, str]) -> Entity:
     )
 
 # Register aliases
+register_many(["assembling-machine-2", "assembling-machine-3"])(parse_assembling_machine)
 register_many(["fast-transport-belt", "express-transport-belt"])(parse_transport_belt)
 register_many(["steel-furnace", "electric-furnace"])(parse_stone_furnace)
