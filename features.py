@@ -1,11 +1,14 @@
-﻿from typing import Dict, List, Optional, Tuple, Any
+﻿from rcon_bridge_1_0_0.rcon_bridge import CharInfo
+from typing import Dict, List, Optional, Tuple, Any
 from parsers import Entity  # Import the base Entity class
 from mappings import (
     STATUS_MAP,
     MACHINE_NAME_MAP,
     MINING_TARGET_MAP,
-    RECIPE_MAP
+    RECIPE_MAP,
+    ITEM_MAP
 )
+
 
 # --- Mappers ---
 
@@ -15,39 +18,94 @@ def map_rotation(rot: Optional[int]) -> Optional[int]:
     v = int(rot) % 16
     return v // 4  # 0..3
 
+
 def map_status(status: Optional[int]) -> Optional[int]:
     if status is None:
         return None
     return STATUS_MAP.get(int(status), 2)  # default to "normal"=2
+
 
 def bool_to_int(b: Optional[bool]) -> Optional[int]:
     if b is None:
         return None
     return 1 if b else 0
 
+
 def map_machine(type_name: str) -> int:
     key = type_name.strip().lower()
     return MACHINE_NAME_MAP.get(key, 0)
+
 
 def map_mining_target(name: Optional[str]) -> Optional[int]:
     if not name:
         return None
     return MINING_TARGET_MAP.get(name.strip().lower(), 0)
 
+
 def map_recipe(name: Optional[str]) -> Optional[int]:
     if not name:
         return None
     return RECIPE_MAP.get(name.strip().lower(), 0)
 
+
+def map_items(char_info: CharInfo, bounds: Tuple[int, int, int, int]) -> Dict[str, Any]:
+    """
+    Maps player inventory to item IDs and normalizes player position
+    using the provided entity bounds.
+    """
+    min_x, max_x, min_y, max_y = bounds
+
+    # Normalize Player Position
+    # Handle cases where pos might be missing or None
+    pos = char_info.get("pos", {"x": 0, "y": 0})
+    raw_x: float = pos.get("x", 0)
+    raw_y: float = pos.get("y", 0)
+
+    norm_x = normalize_coord(raw_x, min_x, max_x)
+    norm_y = normalize_coord(raw_y, min_y, max_y)
+
+    # Map Inventory
+    # Structure: { item_id_int: count_int, ... }
+    inventory_map = {}
+    raw_inventory = char_info.get("inventory", [])
+
+    for item in raw_inventory:
+        name = item.get("name", "")
+        count = item.get("count", 0)
+
+        # Match against ITEM_MAP keys (lowercase, stripped)
+        clean_name = name.strip().lower()
+        item_id = ITEM_MAP.get(clean_name, 0)
+
+        if item_id != 0:
+            inventory_map[item_id] = count
+
+    return {
+        "x": norm_x,
+        "y": norm_y,
+        "inventory": inventory_map
+    }
+
+
 # --- Feature Transformation ---
 
-def compute_bounds(entities: List[Entity]) -> Tuple[int, int, int, int]:
-    if not entities:
-        return (0, 1, 0, 1)
+def compute_bounds(entities: List[Entity], char_info: Optional[CharInfo] = None) -> Tuple[int, int, int, int]:
+    # Collect all X and Y coordinates
     xs = [int(e.x) for e in entities]
     ys = [int(e.y) for e in entities]
+
+    # If player info is provided, include player position in bounds
+    if char_info:
+        pos = char_info.get("pos", {"x": 0, "y": 0})
+        xs.append(int(pos.get("x", 0)))
+        ys.append(int(pos.get("y", 0)))
+
+    if not xs:
+        return (0, 1, 0, 1)
+
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
+
     # Avoid zero-range
     if min_x == max_x:
         max_x = min_x + 1
@@ -55,10 +113,19 @@ def compute_bounds(entities: List[Entity]) -> Tuple[int, int, int, int]:
         max_y = min_y + 1
     return (min_x, max_x, min_y, max_y)
 
+
 def normalize_coord(v: int, min_v: int, max_v: int) -> float:
     # int -> normalize to [-1, 1]
     v_i = int(v)
     return -1.0 + 2.0 * ((v_i - min_v) / (max_v - min_v))
+
+
+def unnormalize_coord(v_norm: float, min_v: int, max_v: int) -> int:
+    v_original = min_v + ((v_norm + 1.0) / 2.0) * (max_v - min_v)
+
+    # Round to nearest integer to restore original int type
+    return int(round(v_original))
+
 
 def to_feature_row(e: Entity, bounds: Tuple[int, int, int, int]) -> Dict[str, Any]:
     min_x, max_x, min_y, max_y = bounds
@@ -94,6 +161,10 @@ def to_feature_row(e: Entity, bounds: Tuple[int, int, int, int]) -> Dict[str, An
 
     return base
 
-def transform_entities(entities: List[Entity]) -> List[Dict[str, Any]]:
-    bounds = compute_bounds(entities)
+
+def transform_entities(entities: List[Entity], bounds: Optional[Tuple[int, int, int, int]] = None) -> List[
+    Dict[str, Any]]:
+    # If bounds aren't passed, compute them from entities alone (fallback)
+    if bounds is None:
+        bounds = compute_bounds(entities)
     return [to_feature_row(e, bounds) for e in entities]

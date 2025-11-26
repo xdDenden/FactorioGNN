@@ -1,14 +1,16 @@
-﻿import torch
+import math
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # Import mappings to get category sizes
 from mappings import (
     MACHINE_NAME_MAP,
     STATUS_MAP,
     MINING_TARGET_MAP,
-    RECIPE_MAP
+    RECIPE_MAP,
+    ITEM_MAP
 )
 
 # --- Category Size Definitions ---
@@ -16,8 +18,11 @@ from mappings import (
 N_MACHINE_TYPES = max(MACHINE_NAME_MAP.values()) + 1  # 0-34 -> 35 categories
 N_STATUS_TYPES = max(STATUS_MAP.values()) + 1  # 0 (None) + 1-16 -> 17 categories
 N_MINING_TARGETS = max(MINING_TARGET_MAP.values()) + 1  # 0 (None) + 1-4 -> 5 categories
-N_RECIPES = max(RECIPE_MAP.values()) + 1  # 0 (None) + 1-67 -> 68 categories
+N_RECIPES = max(RECIPE_MAP.values()) + 1  # 0 (None) + 1-52 -> 53 categories
+N_ITEM_TYPES = max(ITEM_MAP.values()) + 1  # 0 (None) + 1-58 -> 59 categories
+N_ACTIONS = max(STATUS_MAP.values()) + 1
 N_ROTATIONS = 4 + 1  # 0 (None) + 0-3 (as 1-4) -> 5 categories
+
 
 # --- Continuous & Boolean Feature Definitions ---
 # x, y, energy, is_crafting, products_finished
@@ -30,18 +35,27 @@ FEATURE_DIM = (
         N_STATUS_TYPES +
         N_MINING_TARGETS +
         N_RECIPES +
+        N_ITEM_TYPES +
         N_ROTATIONS
-)  # 5 + 35 + 17 + 5 + 68 + 5 = 135 dimensions
+)  # 5 + 35 + 17 + 5 + 59 + 5 + 53 = 179 dimensions
 
 
-def preprocess_features_for_gnn(feature_list: List[Dict[str, Any]]) -> torch.Tensor:
+def preprocess_features_for_gnn(feature_list: List[Dict[str, Any]],
+                                player_info: Optional[Dict[str, Any]] = None) -> torch.Tensor:
     """
     Transforms the list of feature dicts into a 2D tensor for the GNN.
     Handles one-hot encoding for categorical variables and imputes None values.
+
+    Args:
+        feature_list: List of dicts containing entity features.
+        player_info: Optional dict containing processed player info ('x', 'y', 'inventory').
+                     If provided, a row is added to the tensor for the player.
     """
     num_entities = len(feature_list)
-    output_tensor = torch.zeros((num_entities, FEATURE_DIM))
+    total_nodes = num_entities + (1 if player_info else 0)
+    output_tensor = torch.zeros((total_nodes, FEATURE_DIM))
 
+    # --- Process Standard Entities ---
     for i, features in enumerate(feature_list):
         # --- Continuous / Boolean Features (Indices 0-4) ---
 
@@ -54,7 +68,7 @@ def preprocess_features_for_gnn(feature_list: List[Dict[str, Any]]) -> torch.Ten
         # is_crafting (bool)
         output_tensor[i, 3] = float(features.get('is_crafting') or 0.0)
         # products_finished (count) - using log(1+x) to stabilize
-        output_tensor[i, 4] = torch.log(1.0 + float(features.get('products_finished') or 0.0))
+        output_tensor[i, 4] = math.log(1.0 + float(features.get('products_finished') or 0.0))
 
         # --- One-Hot Encoded Features ---
         current_idx = N_CONTINUOUS_FEATURES
@@ -74,10 +88,15 @@ def preprocess_features_for_gnn(feature_list: List[Dict[str, Any]]) -> torch.Ten
         output_tensor[i, current_idx + mining_val] = 1.0
         current_idx += N_MINING_TARGETS
 
-        # Recipe (68 categories, 0 for None, 1-67 for values)
+        # Recipe (53 categories, 0 for None, 1-52 for values)
         recipe_val = features.get('recipe') or 0  # 0 is 'None'
         output_tensor[i, current_idx + recipe_val] = 1.0
         current_idx += N_RECIPES
+
+        # Item Types (59 categories)
+        # Standard entities don't have explicit inventory mapped here in this version,
+        # so we leave this section as zeros for machines.
+        current_idx += N_ITEM_TYPES
 
         # Rotation (5 categories, 0 for None, 1-4 for values 0-3)
         rotation_val = features.get('rotation')
@@ -87,6 +106,36 @@ def preprocess_features_for_gnn(feature_list: List[Dict[str, Any]]) -> torch.Ten
             rot_idx = rotation_val + 1  # Map 0-3 to 1-4
         output_tensor[i, current_idx + rot_idx] = 1.0
         # current_idx += N_ROTATIONS # No need, it's the last one
+
+    # --- Process Player Node (if provided) ---
+    if player_info:
+        p_idx = num_entities  # Player is the last node
+
+        # 1. Continuous Features (x, y)
+        output_tensor[p_idx, 0] = player_info.get('x', 0.0)
+        output_tensor[p_idx, 1] = player_info.get('y', 0.0)
+        # Energy, crafting, products -> 0
+
+        # 2. Categorical Features
+        # Machine, Status, Mining, Recipe -> 0 (None) for all
+        # We need to find the start index for Items
+
+        # Calculate start index for Items
+        item_start_idx = (N_CONTINUOUS_FEATURES +
+                          N_MACHINE_TYPES +
+                          N_STATUS_TYPES +
+                          N_MINING_TARGETS +
+                          N_RECIPES)
+
+        # 3. Inventory (encoded as sparse counts in the Item Types section)
+        # player_info['inventory'] is { item_id: count }
+        inventory = player_info.get('inventory', {})
+        for item_id, count in inventory.items():
+            if 0 < item_id < N_ITEM_TYPES:
+                # We place the amount at the specific item index
+                output_tensor[p_idx, item_start_idx + item_id] = float(count)
+
+        # Rotation -> 0 (None) - Implicitly zero
 
     return output_tensor
 
@@ -109,8 +158,8 @@ def create_grid_hypergraph(entities: List[Any], grid_size: int = 10) -> torch.Te
 
     # 1. Assign nodes to grid cells
     for i, e in enumerate(entities):
-        cell_x = e.x // grid_size
-        cell_y = e.y // grid_size
+        cell_x = int(e.x) // grid_size
+        cell_y = int(e.y) // grid_size
         cell_id = (cell_x, cell_y)
 
         if cell_id not in grid:
@@ -188,7 +237,7 @@ class FactorioHGNN(nn.Module):
     def __init__(self,
                  in_features: int = FEATURE_DIM,
                  hidden_dim: int = 256,
-                 n_actions: int = 10,  # Placeholder for number of actions
+                 n_actions: int = N_ACTIONS,
                  n_items: int = N_RECIPES  # Use recipe list as item list
                  ):
         super(FactorioHGNN, self).__init__()
@@ -211,7 +260,9 @@ class FactorioHGNN(nn.Module):
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, n_actions)
+
         )
+
 
         # Head 2: Item Selection (e.g., copper-plate, iron-gear-wheel)
         # Takes the global graph embedding and predicts an item
@@ -230,6 +281,14 @@ class FactorioHGNN(nn.Module):
             nn.Linear(hidden_dim, 17 * 17)
         )
 
+        # Head 4: Rotation Selection (0-3)
+        # Takes the global graph embedding and predicts a rotation
+        self.rotation_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 4)  # 4 possible rotations
+        )
+
     def forward(self, x: torch.Tensor, H: torch.Tensor):
         """
         Forward pass of the model.
@@ -246,7 +305,13 @@ class FactorioHGNN(nn.Module):
         if x.shape[0] == 0:  # Handle empty factory
             # Return zero logits for all heads
             action_logits = torch.zeros(self.n_actions, device=x.device)
+            action_idx = action_logits.argmax().item()
+            print(f"Predicted action index: {action_idx}")
+
             item_logits = torch.zeros(self.n_items, device=x.device)
+            item_idx = action_logits.argmax().item()
+            print(f"Predicted action index: {item_idx}")
+
             heatmap_logits = torch.zeros((17, 17), device=x.device)
             return action_logits, item_logits, heatmap_logits
 
@@ -262,12 +327,21 @@ class FactorioHGNN(nn.Module):
 
         # --- Action Logits ---
         action_logits = self.action_head(g)
+        action_idx = action_logits.argmax().item()
+        print(f"Predicted action index: {action_idx}")
 
         # --- Item Logits ---
         item_logits = self.item_head(g)
+        item_idx = item_logits.argmax().item()
+        print(f"Predicted item index: {item_idx}")
 
         # --- Heatmap Logits ---
         heatmap_logits_flat = self.heatmap_head(g)
         heatmap_logits = heatmap_logits_flat.view(17, 17)
 
-        return action_logits, item_logits, heatmap_logits
+        # --- Rotation Logits ---
+        rotation_logits = self.rotation_head(g)
+        rotation_idx = rotation_logits.argmax().item()
+        print(f"Predicted rotation index: {rotation_idx}")
+
+        return action_logits, item_logits, heatmap_logits,action_idx,item_idx,rotation_idx

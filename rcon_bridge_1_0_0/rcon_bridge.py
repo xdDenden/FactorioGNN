@@ -1,10 +1,24 @@
 import json
+import math
 from typing import List, Dict, Any, Optional
 from mcrcon import MCRcon
+from typing import TypedDict, Any, List
 
 HOST = "localhost"
 PORT = 27015
 PASSWORD = "eenie7Uphohpaim"
+
+class Position(TypedDict):
+    x: float
+    y: float
+
+class InventoryItem(TypedDict):
+    name: str
+    count: int
+
+class CharInfo(TypedDict):
+    pos: Position
+    inventory: List[InventoryItem]
 
 class Rcon_reciever:
     def __init__(self, host: str = HOST, password: str = PASSWORD , port: int = PORT):
@@ -32,24 +46,85 @@ class Rcon_reciever:
         if not response or not response.strip():
             return []
         entities = json.loads(response)
-
         return entities
+
+    def scan_entities_boundingboxes(self) -> List[Dict[str, Any]]:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        response = self._rcon.command("/scan_entities_boundingboxes")
+        if not response or not response.strip():
+            return []
+        entitieswithBoundingBoxes = json.loads(response)
+        return entitieswithBoundingBoxes
+
     def move_to(self, x: int, y: int) -> None:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
-        command = self._rcon.command("/moveto x={} y={}".format(x, y))
+        command = self._rcon.command(f"/moveto {x} {y}")
         return None
-    def char_info(self) -> None:
+
+    def char_info(self) -> CharInfo:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
-        command = self._rcon.command("/char_info")
+
+        response = self._rcon.command("/char_info")
+        if not response or not response.strip():
+            return {"pos": {"x": 0, "y": 0}, "inventory": []}
+
+        return json.loads(response)
+
     def give(self, itemIndex: int, amount: int) -> None:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
-        command = self._rcon.command("/give itemIndex={} amount={}".format(itemIndex, amount))
-        return None
+        self._rcon.command(f"/give {itemIndex} {amount}")
 
+    def craft(self, itemIndex: int, amount: int) -> None:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        self._rcon.command(f"/craft {itemIndex} {amount}")
 
+    def mine(self, x: float, y: float) -> None:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        if self.distanceCheck(x, y):
+            self._rcon.command(f"/mine {x} {y} ")
+
+    def insert(self,x: float, y: float, itemIndex: int, amount: int) -> None:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        if self.distanceCheck(x, y):
+            self._rcon.command(f"/insert_into {x} {y} {itemIndex} {amount}")
+
+    def take(self,x: float, y: float) -> None:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        if self.distanceCheck(x, y):
+            self._rcon.command(f"/take {x} {y} ")
+
+    def change_recipe(self,x: float, y: float, itemIndex: int) -> None:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        if self.distanceCheck(x, y):
+            self._rcon.command(f"/c_recipe {x} {y} {itemIndex} ")
+
+    def build(self, x: float, y: float, buildingIndex: int, rotation: int) -> None:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        if self.distanceCheck(x, y):
+            self._rcon.command(f"/build {x} {y} {buildingIndex} {rotation} ")
+
+    def distanceCheck(self, x2: float, y2: float) -> bool:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        char_info = self.char_info()
+        x1 = char_info['pos']['x']
+        y1 = char_info['pos']['y']
+        dist = math.dist((x1, y1), (x2, y2))
+
+        if dist <= 20.0:
+            return True
+        else:
+            return False
 
 if __name__ == "__main__":
     receiver =  Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)

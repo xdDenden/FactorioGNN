@@ -1,4 +1,5 @@
 -- control.lua
+local json = require("json")
 
 local moving_characters = {}
 
@@ -399,78 +400,90 @@ end)
 -- Gives character information
 -- Position and Inventory
 commands.add_command("char_info", "", function(event)
-  local player = nil
-  
-  -- Check if the command was run by a player or the server
-  if event.player_index then
-    player = game.players[event.player_index]
-  end
+    local player = nil
 
-  -- Helper function to print to the correct target (Player or Server Console)
-  local function output(msg)
-    if player then
-      player.print(msg)
-    else
-      game.print(msg) -- Prints to everyone/console if run by server
+    -- Check if the command was run by a player or the server
+    if event.player_index then
+        player = game.players[event.player_index]
     end
-  end
 
-  local surface = game.surfaces[1]
-  
-  -- Find AI Character
-  local ai_characters = surface.find_entities_filtered{
-    name = "character",
-    force = "AI"
-  }
-  
-  if #ai_characters == 0 then
-    output("No AI Character found.")
-    return
-  end
-
-  local character = ai_characters[1]
-  
-  -- Output Position
-  local pos = character.position
-  output("Position: x=" .. pos.x .. ", y=" .. pos.y)
-  
-  -- Check Inventory
-  local inventory = character.get_main_inventory()
-  
-  if not inventory then
-    output("  - No Inventory")
-    return
-  end
-  
-  local slot_count = #inventory
-  
-  if inventory.is_empty() then
-    output("  - Empty")
-  else
-    -- Collect all items
-    local item_counts = {}
-    
-    for i = 1, slot_count do
-      local stack = inventory[i]
-      if stack.valid_for_read then
-        local name = stack.name
-        local count = stack.count
-        
-        if item_counts[name] then
-          item_counts[name] = item_counts[name] + count
+    -- Helper function to print to the correct target (Player or Server Console)
+    local function output(msg)
+        if player then
+            player.print(msg)
         else
-          item_counts[name] = count
+            game.print(msg) -- Prints to everyone/console if run by server
         end
-      end
     end
-    
-    -- Output
-    for item_name, total_count in pairs(item_counts) do
-      output("  - " .. item_name .. ": " .. total_count)
-    end
-  end
-end)
 
+    local surface = game.surfaces[1]
+
+    -- Find AI Character
+    local ai_characters = surface.find_entities_filtered{
+        name = "character",
+        force = "AI"
+    }
+
+    if #ai_characters == 0 then
+        output("No AI Character found.")
+        return
+    end
+
+    local character = ai_characters[1]
+
+    -- Output Position
+    local pos = character.position
+    output("Position: x=" .. pos.x .. ", y=" .. pos.y)
+
+
+    -- Check Inventory
+    local inventory = character.get_main_inventory()
+
+    if not inventory then
+        output("  - No Inventory")
+        return
+    end
+
+    local slot_count = #inventory
+
+    if inventory.is_empty() then
+        output("  - Empty")
+    else
+        -- Collect all items
+        local item_counts = {}
+
+        for i = 1, slot_count do
+            local stack = inventory[i]
+            if stack.valid_for_read then
+                local name = stack.name
+                local count = stack.count
+
+                if item_counts[name] then
+                    item_counts[name] = item_counts[name] + count
+                else
+                    item_counts[name] = count
+                end
+            end
+        end
+
+        -- Output
+        local inventoryOutput = {}
+
+        for item_name, total_count in pairs(item_counts) do
+            output("  - " .. item_name .. ": " .. total_count)
+            table.insert(inventoryOutput, {name = item_name, count = total_count})
+        end
+
+        local outputstring = json.encode({
+            pos = pos,
+            inventory = inventoryOutput
+        })
+
+        rcon.print(outputstring)
+
+    end
+
+end)
 --Insert items from the character into a machine
 --/insert x y <itemindex(1-52)> <amount>
 commands.add_command("insert_into", "AI Character inserts items into machine: /insert <item_id> <count> <x> <y>", function(event)
@@ -701,3 +714,4 @@ commands.add_command("take", "Take items from machine: /take <x> <y>", function(
         game.print("No items found in " .. machine.name .. " at (" .. x .. ", " .. y .. ")")
     end
 end)
+
