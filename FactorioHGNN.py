@@ -10,7 +10,7 @@ from mappings import (
     STATUS_MAP,
     MINING_TARGET_MAP,
     RECIPE_MAP,
-    ITEM_MAP
+    ITEM_MAP, ACTION_MAP
 )
 
 # --- Category Size Definitions ---
@@ -20,7 +20,7 @@ N_STATUS_TYPES = max(STATUS_MAP.values()) + 1  # 0 (None) + 1-16 -> 17 categorie
 N_MINING_TARGETS = max(MINING_TARGET_MAP.values()) + 1  # 0 (None) + 1-4 -> 5 categories
 N_RECIPES = max(RECIPE_MAP.values()) + 1  # 0 (None) + 1-52 -> 53 categories
 N_ITEM_TYPES = max(ITEM_MAP.values()) + 1  # 0 (None) + 1-58 -> 59 categories
-N_ACTIONS = max(STATUS_MAP.values()) + 1
+N_ACTIONS = max(ACTION_MAP.values()) + 1
 N_ROTATIONS = 4 + 1  # 0 (None) + 0-3 (as 1-4) -> 5 categories
 
 
@@ -298,50 +298,40 @@ class FactorioHGNN(nn.Module):
             H (Tensor): Hypergraph incidence matrix (N, E)
 
         Returns:
-            action_logits (Tensor): (n_actions,)
-            item_logits (Tensor): (n_items,)
+            action_idx (int): The index of the predicted action.
+            item_idx (int): The index of the predicted item.
+            rotation_idx (int): The index of the predicted rotation.
             heatmap_logits (Tensor): (17, 17)
         """
         if x.shape[0] == 0:  # Handle empty factory
-            # Return zero logits for all heads
-            action_logits = torch.zeros(self.n_actions, device=x.device)
-            action_idx = action_logits.argmax().item()
-            print(f"Predicted action index: {action_idx}")
-
-            item_logits = torch.zeros(self.n_items, device=x.device)
-            item_idx = action_logits.argmax().item()
-            print(f"Predicted action index: {item_idx}")
-
+            # Return zero for all outputs
+            action_idx = 0
+            item_idx = 0
+            rotation_idx = 0
             heatmap_logits = torch.zeros((17, 17), device=x.device)
-            return action_logits, item_logits, heatmap_logits
+            return action_idx, item_idx, rotation_idx, heatmap_logits
 
         # 1. Pass through GNN layers
         x = self.relu(self.hgc1(x, H))
         x = self.relu(self.hgc2(x, H))  # Node embeddings (N, hidden_dim)
 
         # 2. Pool node features to get a global graph embedding
-        # Using mean pooling here
         g = torch.mean(x, dim=0)  # Shape (hidden_dim,)
 
-        # 3. Pass graph embedding through each head
-
-        # --- Action Logits ---
+        # 3. Pass graph embedding through each head and get indices
         action_logits = self.action_head(g)
         action_idx = action_logits.argmax().item()
         print(f"Predicted action index: {action_idx}")
 
-        # --- Item Logits ---
         item_logits = self.item_head(g)
         item_idx = item_logits.argmax().item()
         print(f"Predicted item index: {item_idx}")
 
-        # --- Heatmap Logits ---
-        heatmap_logits_flat = self.heatmap_head(g)
-        heatmap_logits = heatmap_logits_flat.view(17, 17)
-
-        # --- Rotation Logits ---
         rotation_logits = self.rotation_head(g)
         rotation_idx = rotation_logits.argmax().item()
         print(f"Predicted rotation index: {rotation_idx}")
 
-        return action_logits, item_logits, heatmap_logits,action_idx,item_idx,rotation_idx
+        heatmap_logits_flat = self.heatmap_head(g)
+        heatmap_logits = heatmap_logits_flat.view(17, 17)
+
+        return action_idx, item_idx, rotation_idx, heatmap_logits

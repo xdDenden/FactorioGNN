@@ -45,7 +45,7 @@ if __name__ == "__main__":
         # 1. Parse raw dicts into Entity objects
         # We need this original list for coordinates
         entities = [parse_entity(e['machine_name'], e) for e in raw_entities]
-        Edging.translateEntitesToEdges(receiver)
+        #Edging.translateEntitesToEdges(receiver)
 
         # Calculate bounds once, covering both entities and player position
         bounds = compute_bounds(entities, char_info=raw_playerInfo)
@@ -76,7 +76,7 @@ if __name__ == "__main__":
         model.eval()  # Set to evaluation mode
 
         with torch.no_grad():
-            action, item, heatmap = model(node_features, H)
+            action_idx, item_idx, rotation_idx, heatmap = model(node_features, H)
 
 
         # 1. Find the flat index of the maximum value
@@ -100,8 +100,7 @@ if __name__ == "__main__":
         print(f"Predicted heatmap index: [{x_grid_idx}, {y_grid_idx}]")
         print(f"Predicted World position: x={final_x}, y={final_y}")
 
-
-        translateGNNtoFactorio(final_x, final_y, action, item, receiver)
+        translateGNNtoFactorio(final_x, final_y, action_idx, item_idx, rotation_idx, receiver)
 
 
         # print(f"Action logits shape: {action.shape}")

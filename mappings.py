@@ -164,12 +164,12 @@ ITEM_MAP: Dict[str, int] = {
     "stone-brick": 58,
 
 }
-ACTION_MAP = [
-    "moveto",       # Index 0
-    "mine",         # Index 1
-    "craft",        # Index 2
-    "build",        # Index 3
-    "insert_into",  # Index 4
-    "take"          # Index 5
-    "chane_recipe"  # Index 6
-]
+ACTION_MAP = {
+    "moveto": 1,      # Index 0
+    "mine": 2,         # Index 1
+    "craft": 3,        # Index 2
+    "build": 4,      # Index 3
+    "insert_into": 5,  # Index 4
+    "take": 6,          # Index 5
+    "change_recipe":7  # Index 6
+}
