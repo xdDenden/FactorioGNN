@@ -233,6 +233,7 @@ local function scan_entities_boundingboxes()
         entity_data.x = entity.position.x
         entity_data.y = entity.position.y
 		entity_data.selection_box = entity.selection_box
+		entity_data.rotation = entity.direction or "None"
 		
 		table.insert(entities_list, entity_data)
 	end

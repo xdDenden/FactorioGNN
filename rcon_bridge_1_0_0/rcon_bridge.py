@@ -20,6 +20,24 @@ class CharInfo(TypedDict):
     pos: Position
     inventory: List[InventoryItem]
 
+class Coordinates(TypedDict):
+    x: float
+    y: float
+
+# 2. Define the structure of the bounding box itself
+class BoundingBox(TypedDict):
+    left_top: Coordinates
+    right_bottom: Coordinates
+
+# 3. Define the main Entity structure
+class EntityData(TypedDict):
+    machine_name: str
+    x: float
+    y: float
+    # Note: Your Lua script uses "selection_box", but your JSON example
+    # uses "bounding_box". Ensure these match.
+    bounding_box: BoundingBox
+
 class Rcon_reciever:
     def __init__(self, host: str = HOST, password: str = PASSWORD , port: int = PORT):
         self.host = host
@@ -48,14 +66,18 @@ class Rcon_reciever:
         entities = json.loads(response)
         return entities
 
-    def scan_entities_boundingboxes(self) -> List[Dict[str, Any]]:
+    def scan_entities_boundingboxes(self) -> List[EntityData]:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
+
+        # Note: Ensure the Lua command string matches the function name in Lua
         response = self._rcon.command("/scan_entities_boundingboxes")
+
         if not response or not response.strip():
             return []
-        entitieswithBoundingBoxes = json.loads(response)
-        return entitieswithBoundingBoxes
+
+        entities_with_bounding_boxes: List[EntityData] = json.loads(response)
+        return entities_with_bounding_boxes
 
     def move_to(self, x: int, y: int) -> None:
         if not self._rcon:

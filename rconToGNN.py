@@ -45,7 +45,7 @@ if __name__ == "__main__":
         # 1. Parse raw dicts into Entity objects
         # We need this original list for coordinates
         entities = [parse_entity(e['machine_name'], e) for e in raw_entities]
-        #Edging.translateEntitesToEdges(receiver)
+        Edging.translateEntitesToEdges(receiver)
 
         # Calculate bounds once, covering both entities and player position
         bounds = compute_bounds(entities, char_info=raw_playerInfo)
@@ -68,7 +68,6 @@ if __name__ == "__main__":
 
         # Combine entities with player for the graph structure
         all_entities = entities + [player_entity]
-
         H = create_grid_hypergraph(all_entities, grid_size=10)
 
         # 5. Instantiate and run the model
