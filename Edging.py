@@ -6,10 +6,29 @@ def translateEntitesToEdges(reciever) -> None:
      raw_entities_BB = [{'machine_name': 'transport-belt', 'x': -28.5, 'y': -26.5, 'selection_box': {'left_top': {'y': -27, 'x': -29}, 'right_bottom': {'y': -26, 'x': -28}}, 'rotation': 12}, {'machine_name': 'express-transport-belt', 'x': -26.5, 'y': -26.5, 'selection_box': {'left_top': {'y': -27, 'x': -27}, 'right_bottom': {'y': -26, 'x': -26}}, 'rotation': 12}, {'machine_name': 'fast-transport-belt', 'x': -27.5, 'y': -26.5, 'selection_box': {'left_top': {'y': -27, 'x': -28}, 'right_bottom': {'y': -26, 'x': -27}}, 'rotation': 8}, {'machine_name': 'turbo-transport-belt', 'x': -25.5, 'y': -26.5, 'selection_box': {'left_top': {'y': -27, 'x': -26}, 'right_bottom': {'y': -26, 'x': -25}}, 'rotation': 0}, {'machine_name': 'inserter', 'x': -20.5, 'y': -26.5, 'selection_box': {'left_top': {'y': -26.84765625, 'x': -20.8984375}, 'right_bottom': {'y': -26.05078125, 'x': -20.1015625}}, 'rotation': 0}, {'machine_name': 'burner-inserter', 'x': -21.5, 'y': -26.5, 'selection_box': {'left_top': {'y': -26.84765625, 'x': -21.8984375}, 'right_bottom': {'y': -26.05078125, 'x': -21.1015625}}, 'rotation': 0}, {'machine_name': 'steam-engine', 'x': -16.5, 'y': -26.5, 'selection_box': {'left_top': {'y': -29, 'x': -18}, 'right_bottom': {'y': -24, 'x': -15}}, 'rotation': 0}, {'machine_name': 'offshore-pump', 'x': -5.5, 'y': -27.5, 'selection_box': {'left_top': {'y': -27.98828125, 'x': -6.09765625}, 'right_bottom': {'y': -26.01171875, 'x': -4.90234375}}, 'rotation': 8}, {'machine_name': 'pipe', 'x': -3.5, 'y': -26.5, 'selection_box': {'left_top': {'y': -27, 'x': -4}, 'right_bottom': {'y': -26, 'x': -3}}, 'rotation': 0}, {'machine_name': 'small-electric-pole', 'x': -0.5, 'y': -26.5, 'selection_box': {'left_top': {'y': -26.8984375, 'x': -0.8984375}, 'right_bottom': {'y': -26.1015625, 'x': -0.1015625}}, 'rotation': 0}, {'machine_name': 'pipe-to-ground', 'x': -1.5, 'y': -26.5, 'selection_box': {'left_top': {'y': -27, 'x': -2}, 'right_bottom': {'y': -26, 'x': -1}}, 'rotation': 8}, {'machine_name': 'medium-electric-pole', 'x': 0.5, 'y': -26.5, 'selection_box': {'left_top': {'y': -27, 'x': 0}, 'right_bottom': {'y': -26, 'x': 1}}, 'rotation': 0}, {'machine_name': 'assembling-machine-1', 'x': -46.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -27, 'x': -48}, 'right_bottom': {'y': -24, 'x': -45}}, 'rotation': 0}, {'machine_name': 'assembling-machine-2', 'x': -43.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -27, 'x': -45}, 'right_bottom': {'y': -24, 'x': -42}}, 'rotation': 0}, {'machine_name': 'assembling-machine-3', 'x': -40.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -27, 'x': -42}, 'right_bottom': {'y': -24, 'x': -39}}, 'rotation': 0}, {'machine_name': 'stone-furnace', 'x': -38, 'y': -26, 'selection_box': {'left_top': {'y': -27, 'x': -38.796875}, 'right_bottom': {'y': -25, 'x': -37.203125}}, 'rotation': 0}, {'machine_name': 'steel-furnace', 'x': -36, 'y': -26, 'selection_box': {'left_top': {'y': -27, 'x': -36.796875}, 'right_bottom': {'y': -25, 'x': -35.203125}}, 'rotation': 0}, {'machine_name': 'burner-mining-drill', 'x': -34, 'y': -26, 'selection_box': {'left_top': {'y': -27, 'x': -35}, 'right_bottom': {'y': -25, 'x': -33}}, 'rotation': 8}, {'machine_name': 'electric-mining-drill', 'x': -30.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -27, 'x': -32}, 'right_bottom': {'y': -24, 'x': -29}}, 'rotation': 8}, {'machine_name': 'underground-belt', 'x': -28.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -26, 'x': -29}, 'right_bottom': {'y': -25, 'x': -28}}, 'rotation': 8}, {'machine_name': 'express-underground-belt', 'x': -26.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -26, 'x': -27}, 'right_bottom': {'y': -25, 'x': -26}}, 'rotation': 8}, {'machine_name': 'fast-underground-belt', 'x': -27.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -26, 'x': -28}, 'right_bottom': {'y': -25, 'x': -27}}, 'rotation': 8}, {'machine_name': 'turbo-underground-belt', 'x': -25.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -26, 'x': -26}, 'right_bottom': {'y': -25, 'x': -25}}, 'rotation': 0}, {'machine_name': 'chemical-plant', 'x': -23.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -27, 'x': -25}, 'right_bottom': {'y': -24, 'x': -22}}, 'rotation': 8}, {'machine_name': 'bulk-inserter', 'x': -21.5, 'y': -24.5, 'selection_box': {'left_top': {'y': -24.84765625, 'x': -21.8984375}, 'right_bottom': {'y': -24.05078125, 'x': -21.1015625}}, 'rotation': 0}, {'machine_name': 'fast-inserter', 'x': -20.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -25.84765625, 'x': -20.8984375}, 'right_bottom': {'y': -25.05078125, 'x': -20.1015625}}, 'rotation': 0}, {'machine_name': 'long-handed-inserter', 'x': -21.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -25.84765625, 'x': -21.8984375}, 'right_bottom': {'y': -25.05078125, 'x': -21.1015625}}, 'rotation': 0}, {'machine_name': 'boiler', 'x': -19, 'y': -25.5, 'selection_box': {'left_top': {'y': -27, 'x': -20}, 'right_bottom': {'y': -24, 'x': -18}}, 'rotation': 12}, {'machine_name': 'oil-refinery', 'x': -12.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -28, 'x': -15}, 'right_bottom': {'y': -23, 'x': -10}}, 'rotation': 8}, {'machine_name': 'lab', 'x': -8.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -27, 'x': -10}, 'right_bottom': {'y': -24, 'x': -7}}, 'rotation': 0}, {'machine_name': 'pipe', 'x': -3.5, 'y': -24.5, 'selection_box': {'left_top': {'y': -25, 'x': -4}, 'right_bottom': {'y': -24, 'x': -3}}, 'rotation': 0}, {'machine_name': 'pipe', 'x': -3.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -26, 'x': -4}, 'right_bottom': {'y': -25, 'x': -3}}, 'rotation': 0}, {'machine_name': 'pipe-to-ground', 'x': -1.5, 'y': -25.5, 'selection_box': {'left_top': {'y': -26, 'x': -2}, 'right_bottom': {'y': -25, 'x': -1}}, 'rotation': 0}, {'machine_name': 'big-electric-pole', 'x': 2, 'y': -26, 'selection_box': {'left_top': {'y': -27, 'x': 1}, 'right_bottom': {'y': -25, 'x': 3}}, 'rotation': 0}, {'machine_name': 'substation', 'x': 4, 'y': -26, 'selection_box': {'left_top': {'y': -27, 'x': 3}, 'right_bottom': {'y': -25, 'x': 5}}, 'rotation': 0}]
 
 
-machines = [{'machine_name': 'underground-belt', 'x': -3.5, 'y': -13.5,
-             'selection_box': {'left_top': {'y': -14, 'x': -4}, 'right_bottom': {'y': -13, 'x': -3}}, 'rotation': 4},
-            {'machine_name': 'underground-belt', 'x': 1.5, 'y': -13.5,
-             'selection_box': {'left_top': {'y': -14, 'x': 1}, 'right_bottom': {'y': -13, 'x': 2}}, 'rotation': 4}]
+machines = [{'machine_name': 'offshore-pump', 'x': -3.5, 'y': -25.5,
+             'selection_box': {'left_top': {'y': -26.09765625, 'x': -4.98828125},
+                               'right_bottom': {'y': -24.90234375, 'x': -3.01171875}}, 'rotation': 12},
+            {'machine_name': 'pipe-to-ground', 'x': 20.5, 'y': -18.5,
+             'selection_box': {'left_top': {'y': -19, 'x': 20}, 'right_bottom': {'y': -18, 'x': 21}}, 'rotation': 8},
+            {'machine_name': 'pipe', 'x': -8.5, 'y': -17.5,
+             'selection_box': {'left_top': {'y': -18, 'x': -9}, 'right_bottom': {'y': -17, 'x': -8}}, 'rotation': 0},
+            {'machine_name': 'pipe', 'x': -8.5, 'y': -16.5,
+             'selection_box': {'left_top': {'y': -17, 'x': -9}, 'right_bottom': {'y': -16, 'x': -8}}, 'rotation': 0},
+            {'machine_name': 'pipe', 'x': -9.5, 'y': -16.5,
+             'selection_box': {'left_top': {'y': -17, 'x': -10}, 'right_bottom': {'y': -16, 'x': -9}}, 'rotation': 0},
+            {'machine_name': 'pipe', 'x': -7.5, 'y': -16.5,
+             'selection_box': {'left_top': {'y': -17, 'x': -8}, 'right_bottom': {'y': -16, 'x': -7}}, 'rotation': 0},
+            {'machine_name': 'pipe-to-ground', 'x': 18.5, 'y': -16.5,
+             'selection_box': {'left_top': {'y': -17, 'x': 18}, 'right_bottom': {'y': -16, 'x': 19}}, 'rotation': 4},
+            {'machine_name': 'boiler', 'x': 20.5, 'y': -17,
+             'selection_box': {'left_top': {'y': -18, 'x': 19}, 'right_bottom': {'y': -16, 'x': 22}}, 'rotation': 0},
+            {'machine_name': 'pipe', 'x': 22.5, 'y': -16.5,
+             'selection_box': {'left_top': {'y': -17, 'x': 22}, 'right_bottom': {'y': -16, 'x': 23}}, 'rotation': 0},
+            {'machine_name': 'pipe', 'x': -8.5, 'y': -14.5,
+             'selection_box': {'left_top': {'y': -15, 'x': -9}, 'right_bottom': {'y': -14, 'x': -8}}, 'rotation': 0},
+            {'machine_name': 'pipe', 'x': -8.5, 'y': -15.5,
+             'selection_box': {'left_top': {'y': -16, 'x': -9}, 'right_bottom': {'y': -15, 'x': -8}}, 'rotation': 0}]
 
 
 def get_search_coords(x, y, rotation, distance=1):
@@ -34,7 +53,7 @@ def is_point_in_selection_box(px, py, selection_box):
 
 
 def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotation=False, check_selection_box=False,
-               is_underground_belt=False, is_inserter=False):
+               is_underground_belt=False, is_inserter=False, is_pipe_to_ground=False):
     """
     Generic edge detection.
 
@@ -43,8 +62,9 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
     max_distance: how far to look in the direction of rotation
     strict_rotation: if True, only match exact rotation
     check_selection_box: if True, verify search coords are within target's selection box
-    is_underground_belt: if True, use underground belt pairing logic
+    is_underground_belt: if True, use underground belt pairing logic (same rotation)
     is_inserter: if True, use inserter pickup/drop logic
+    is_pipe_to_ground: if True, use pipe-to-ground pairing logic (opposite rotation)
     """
     edges = []
 
@@ -58,16 +78,24 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
 
             x, y, rotation = machine['x'], machine['y'], machine['rotation']
 
-            print(f"\n=== INSERTER at x: {x}, y: {y}, rotation: {rotation} ===")
+            # Determine pickup/drop distance based on inserter type
+            if machine['machine_name'] == 'long-handed-inserter':
+                pickup_distance = 2
+                drop_distance = 2
+            else:
+                pickup_distance = 1
+                drop_distance = 1
 
-            # Check 1 tile in front (pickup side)
-            front_x, front_y = get_search_coords(x, y, rotation, distance=1)
-            print(f"  Front (pickup): x: {front_x}, y: {front_y}")
+            print(f"\n=== INSERTER ({machine['machine_name']}) at x: {x}, y: {y}, rotation: {rotation} ===")
 
-            # Check 1 tile behind (drop side) - opposite direction
+            # Check tiles in front (pickup side)
+            front_x, front_y = get_search_coords(x, y, rotation, distance=pickup_distance)
+            print(f"  Front (pickup): x: {front_x}, y: {front_y} (distance: {pickup_distance})")
+
+            # Check tiles behind (drop side) - opposite direction
             behind_rotation = (rotation + 8) % 16
-            behind_x, behind_y = get_search_coords(x, y, behind_rotation, distance=1)
-            print(f"  Behind (drop): x: {behind_x}, y: {behind_y}")
+            behind_x, behind_y = get_search_coords(x, y, behind_rotation, distance=drop_distance)
+            print(f"  Behind (drop): x: {behind_x}, y: {behind_y} (distance: {drop_distance})")
 
             # Check all machines to see if front/behind coords are in their selection boxes
             front_entity = None
@@ -77,13 +105,10 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
                 if other == machine:
                     continue
 
-                # Check if it's an assembler, transport belt, or chemical/oil buildings
-                if not (
-                        other['machine_name'].startswith('assembling-machine') or
+                # Check if it's an assembler or transport belt
+                if not (other['machine_name'].startswith('assembling-machine') or
                         'transport-belt' in other['machine_name'] or
-                        'belt' in other['machine_name'] or
-                        other['machine_name'] in ('chemical-plant', 'oil-refinery', 'lab')
-                ):
+                        'belt' in other['machine_name']):
                     continue
 
                 # Check front position
@@ -123,7 +148,59 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
 
         return edges
 
-    # Handle underground belt pairing logic
+    # Handle pipe-to-ground pairing logic (opposite rotations, search in opposite direction)
+    if is_pipe_to_ground:
+        coord_lookup = {}
+        for m in machine_list:
+            coord_lookup[(m['x'], m['y'])] = m
+
+        for machine in machine_list:
+            if machine['machine_name'] not in check_from:
+                continue
+
+            x, y, rotation = machine['x'], machine['y'], machine['rotation']
+
+            print(f"\n=== PIPE-TO-GROUND at x: {x}, y: {y}, rotation: {rotation} ===")
+
+            # Calculate opposite rotation
+            opposite_rotation = (rotation + 8) % 16
+
+            # Search in the OPPOSITE direction (where the pipe opening is)
+            search_rotation = opposite_rotation
+
+            # Search multiple distances ahead to find matching pipe-to-ground
+            for distance in range(1, max_distance + 1):
+                searchx, searchy = get_search_coords(x, y, search_rotation, distance)
+                print(f"  Searching at distance {distance}: x: {searchx}, y: {searchy}")
+
+                other = coord_lookup.get((searchx, searchy))
+
+                if other and other['machine_name'] in check_to:
+                    # If we find a pipe-to-ground with the SAME rotation, stop searching (blocked)
+                    if other['rotation'] == rotation:
+                        print(f"    ✗ Found pipe-to-ground with SAME rotation {rotation} - blocking, stop searching")
+                        break
+
+                    # Pipe-to-ground must have opposite rotation to connect
+                    if other['rotation'] == opposite_rotation:
+                        edges.append({
+                            "from_name": machine['machine_name'],
+                            "from_x": x,
+                            "from_y": y,
+                            "to_name": other['machine_name'],
+                            "to_x": searchx,
+                            "to_y": searchy
+                        })
+                        print(
+                            f"    ✓ Found matching pipe-to-ground: {machine['machine_name']}({x},{y}) rotation {rotation} -> {other['machine_name']}({searchx},{searchy}) rotation {other['rotation']}")
+                        break  # Found the pair, stop searching
+                    else:
+                        print(
+                            f"    ✗ Found pipe-to-ground but rotation doesn't match (expected {opposite_rotation}, got {other['rotation']})")
+
+        return edges
+
+    # Handle underground belt pairing logic (same rotations)
     if is_underground_belt:
         coord_lookup = {}
         for m in machine_list:
@@ -215,6 +292,450 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
     return edges
 
 
+def find_pipe_edges(machine_list):
+    """Find pipe-to-pipe connections in a + shape, removing duplicates."""
+    edges = []
+    coord_lookup = {}
+
+    # Build coordinate lookup for pipes
+    for m in machine_list:
+        if m['machine_name'] == 'pipe':
+            coord_lookup[(m['x'], m['y'])] = m
+
+    # For each pipe, check all 4 directions
+    for machine in machine_list:
+        if machine['machine_name'] != 'pipe':
+            continue
+
+        x, y = machine['x'], machine['y']
+        print(f"\n=== PIPE at x: {x}, y: {y} ===")
+
+        # Check all 4 directions (+ shape)
+        directions = [
+            (x, y - 1),  # North
+            (x + 1, y),  # East
+            (x, y + 1),  # South
+            (x - 1, y)  # West
+        ]
+
+        for check_x, check_y in directions:
+            print(f"  Checking direction: x: {check_x}, y: {check_y}")
+            other = coord_lookup.get((check_x, check_y))
+
+            if other:
+                edges.append({
+                    "from_name": machine['machine_name'],
+                    "from_x": x,
+                    "from_y": y,
+                    "to_name": other['machine_name'],
+                    "to_x": check_x,
+                    "to_y": check_y
+                })
+                print(f"    ✓ Found pipe connection: ({x},{y}) -> ({check_x},{check_y})")
+
+    # Remove duplicate edges (keep only one direction per connection)
+    seen = set()
+    deduplicated_edges = []
+
+    for edge in edges:
+        # Create a normalized key (smaller coords first)
+        coord1 = (edge['from_x'], edge['from_y'])
+        coord2 = (edge['to_x'], edge['to_y'])
+        edge_key = tuple(sorted([coord1, coord2]))
+
+        if edge_key not in seen:
+            seen.add(edge_key)
+            deduplicated_edges.append(edge)
+
+    print(f"\n=== PIPE DEDUPLICATION ===")
+    print(f"Original pipe edges: {len(edges)}")
+    print(f"After deduplication: {len(deduplicated_edges)}")
+
+    return deduplicated_edges
+
+
+def find_chemical_plant_pipe_edges(machine_list):
+    """Find pipe connections to chemical plants based on rotation."""
+    edges = []
+    coord_lookup = {}
+
+    # Build coordinate lookup for pipes and pipe-to-ground
+    for m in machine_list:
+        if m['machine_name'] in ('pipe', 'pipe-to-ground'):
+            coord_lookup[(m['x'], m['y'])] = m
+
+    # For each chemical plant, check pipe connection points based on rotation
+    for machine in machine_list:
+        if machine['machine_name'] != 'chemical-plant':
+            continue
+
+        x, y, rotation = machine['x'], machine['y'], machine['rotation']
+        print(f"\n=== CHEMICAL PLANT at x: {x}, y: {y}, rotation: {rotation} ===")
+
+        # Define pipe connection offsets and required rotations for each chemical plant rotation
+        # For pipe-to-ground: "in" side (same rotation) vs "out" side (opposite rotation)
+
+        pipe_connections = []
+
+        if rotation == 0:  # North (arrow pointing up)
+            pipe_connections = [
+                {'offset': (-1, -2), 'required_rotation': 8, 'side': 'top-left'},
+                # Top pipes need opposite rotation (pointing down towards plant)
+                {'offset': (1, -2), 'required_rotation': 8, 'side': 'top-right'},
+                {'offset': (-1, 2), 'required_rotation': 0, 'side': 'bottom-left'},
+                # Bottom pipes need same rotation (pointing up towards plant)
+                {'offset': (1, 2), 'required_rotation': 0, 'side': 'bottom-right'}
+            ]
+        elif rotation == 4:  # East (arrow pointing right)
+            pipe_connections = [
+                {'offset': (2, -1), 'required_rotation': 12, 'side': 'right-top'},
+                # Right pipes need opposite rotation (pointing left towards plant)
+                {'offset': (2, 1), 'required_rotation': 12, 'side': 'right-bottom'},
+                {'offset': (-2, -1), 'required_rotation': 4, 'side': 'left-top'},
+                # Left pipes need same rotation (pointing right towards plant)
+                {'offset': (-2, 1), 'required_rotation': 4, 'side': 'left-bottom'}
+            ]
+        elif rotation == 8:  # South (arrow pointing down)
+            pipe_connections = [
+                {'offset': (1, 2), 'required_rotation': 0, 'side': 'bottom-right'},
+                # Bottom pipes need opposite rotation (pointing up towards plant)
+                {'offset': (-1, 2), 'required_rotation': 0, 'side': 'bottom-left'},
+                {'offset': (1, -2), 'required_rotation': 8, 'side': 'top-right'},
+                # Top pipes need same rotation (pointing down towards plant)
+                {'offset': (-1, -2), 'required_rotation': 8, 'side': 'top-left'}
+            ]
+        elif rotation == 12:  # West (arrow pointing left)
+            pipe_connections = [
+                {'offset': (-2, 1), 'required_rotation': 4, 'side': 'left-bottom'},
+                # Left pipes need opposite rotation (pointing right towards plant)
+                {'offset': (-2, -1), 'required_rotation': 4, 'side': 'left-top'},
+                {'offset': (2, 1), 'required_rotation': 12, 'side': 'right-bottom'},
+                # Right pipes need same rotation (pointing left towards plant)
+                {'offset': (2, -1), 'required_rotation': 12, 'side': 'right-top'}
+            ]
+
+        # Check each pipe connection point
+        for connection in pipe_connections:
+            offset_x, offset_y = connection['offset']
+            required_rotation = connection['required_rotation']
+            side = connection['side']
+
+            check_x = x + offset_x
+            check_y = y + offset_y
+            print(f"  Checking {side} at: x: {check_x}, y: {check_y}")
+
+            pipe = coord_lookup.get((check_x, check_y))
+
+            if pipe:
+                # If it's a regular pipe, always connect
+                if pipe['machine_name'] == 'pipe':
+                    edges.append({
+                        "from_name": pipe['machine_name'],
+                        "from_x": check_x,
+                        "from_y": check_y,
+                        "to_name": machine['machine_name'],
+                        "to_x": x,
+                        "to_y": y
+                    })
+                    print(
+                        f"    ✓ Found pipe connection: {pipe['machine_name']}({check_x},{check_y}) -> chemical-plant({x},{y})")
+
+                # If it's pipe-to-ground, check rotation
+                elif pipe['machine_name'] == 'pipe-to-ground':
+                    if pipe['rotation'] == required_rotation:
+                        edges.append({
+                            "from_name": pipe['machine_name'],
+                            "from_x": check_x,
+                            "from_y": check_y,
+                            "to_name": machine['machine_name'],
+                            "to_x": x,
+                            "to_y": y
+                        })
+                        print(
+                            f"    ✓ Found pipe-to-ground connection: {pipe['machine_name']}({check_x},{check_y}) rotation {pipe['rotation']} -> chemical-plant({x},{y})")
+                    else:
+                        print(
+                            f"    ✗ pipe-to-ground rotation mismatch: expected {required_rotation}, got {pipe['rotation']}")
+
+    return edges
+
+
+def find_oil_ref_pipe_edges(machine_list):
+    edges = []
+    coord_lookup = {}
+    for m in machine_list:
+        if m['machine_name'] in ('pipe', 'pipe-to-ground'):
+            coord_lookup[(m['x'], m['y'])] = m
+    for machine in machine_list:
+        if machine['machine_name'] != 'oil-refinery':
+            continue
+
+        x, y, rotation = machine['x'], machine['y'], machine['rotation']
+        print(f"\n=== oil-refinery at x: {x}, y: {y}, rotation: {rotation} ===")
+
+        pipe_connections = []
+
+        if rotation == 0:  # North (arrow pointing up)
+            pipe_connections = [
+                # {'offset': (-2, -3), 'required_rotation': 8, 'side': 'top-left'},      # Top pipes need opposite rotation (pointing down towards plant)
+                {'offset': (2, -3), 'required_rotation': 8, 'side': 'top-right'},
+                # {'offset': (-1, 3), 'required_rotation': 0, 'side': 'bottom-left'},    # Bottom pipes need same rotation (pointing up towards plant)
+                {'offset': (1, 3), 'required_rotation': 0, 'side': 'bottom-right'}
+            ]
+        elif rotation == 4:  # East (arrow pointing right)
+            pipe_connections = [
+                # {'offset': (3, -2), 'required_rotation': 12, 'side': 'right-top'},      # Right pipes need opposite rotation (pointing left towards plant)
+                {'offset': (3, 2), 'required_rotation': 12, 'side': 'right-bottom'},
+                # {'offset': (-3, -1), 'required_rotation': 4, 'side': 'left-top'},       # Left pipes need same rotation (pointing right towards plant)
+                {'offset': (-3, 1), 'required_rotation': 4, 'side': 'left-bottom'}
+            ]
+        elif rotation == 8:  # South (arrow pointing down)
+            pipe_connections = [
+                # {'offset': (1, 3), 'required_rotation': 0, 'side': 'bottom-right'},     # Bottom pipes need opposite rotation (pointing up towards plant)
+                {'offset': (-1, 3), 'required_rotation': 0, 'side': 'bottom-left'},
+                # {'offset': (2, -3), 'required_rotation': 8, 'side': 'top-right'},       # Top pipes need same rotation (pointing down towards plant)
+                {'offset': (-2, -3), 'required_rotation': 8, 'side': 'top-left'}
+            ]
+        elif rotation == 12:  # West (arrow pointing left)
+            pipe_connections = [
+                # {'offset': (-3, 1), 'required_rotation': 4, 'side': 'left-bottom'},     # Left pipes need opposite rotation (pointing right towards plant)
+                {'offset': (-3, -1), 'required_rotation': 4, 'side': 'left-top'},
+                # {'offset': (3, 2), 'required_rotation': 12, 'side': 'right-bottom'},    # Right pipes need same rotation (pointing left towards plant)
+                {'offset': (3, -2), 'required_rotation': 12, 'side': 'right-top'}
+            ]
+
+        # Check each pipe connection point
+        for connection in pipe_connections:
+            offset_x, offset_y = connection['offset']
+            required_rotation = connection['required_rotation']
+            side = connection['side']
+
+            check_x = x + offset_x
+            check_y = y + offset_y
+            print(f"  Checking {side} at: x: {check_x}, y: {check_y}")
+
+            pipe = coord_lookup.get((check_x, check_y))
+
+            if pipe:
+                # If it's a regular pipe, always connect
+                if pipe['machine_name'] == 'pipe':
+                    edges.append({
+                        "from_name": pipe['machine_name'],
+                        "from_x": check_x,
+                        "from_y": check_y,
+                        "to_name": machine['machine_name'],
+                        "to_x": x,
+                        "to_y": y
+                    })
+                    print(
+                        f"    ✓ Found pipe connection: {pipe['machine_name']}({check_x},{check_y}) -> oil-refinery({x},{y})")
+
+                # If it's pipe-to-ground, check rotation
+                elif pipe['machine_name'] == 'pipe-to-ground':
+                    if pipe['rotation'] == required_rotation:
+                        edges.append({
+                            "from_name": pipe['machine_name'],
+                            "from_x": check_x,
+                            "from_y": check_y,
+                            "to_name": machine['machine_name'],
+                            "to_x": x,
+                            "to_y": y
+                        })
+                        print(
+                            f"    ✓ Found pipe-to-ground connection: {pipe['machine_name']}({check_x},{check_y}) rotation {pipe['rotation']} -> oil-refinery({x},{y})")
+                    else:
+                        print(
+                            f"    ✗ pipe-to-ground rotation mismatch: expected {required_rotation}, got {pipe['rotation']}")
+
+    return edges
+
+
+def find_steam_engine_pipe_edges(machine_list):
+    edges = []
+    coord_lookup = {}
+    for m in machine_list:
+        if m['machine_name'] in ('pipe', 'pipe-to-ground'):
+            coord_lookup[(m['x'], m['y'])] = m
+    for machine in machine_list:
+        if machine['machine_name'] != 'steam-engine':
+            continue
+
+        x, y, rotation = machine['x'], machine['y'], machine['rotation']
+        print(f"\n=== oil-refinery at x: {x}, y: {y}, rotation: {rotation} ===")
+
+        pipe_connections = []
+
+        if rotation == 0:  # North (arrow pointing up)
+            pipe_connections = [
+                # {'offset': (-2, -3), 'required_rotation': 8, 'side': 'top-left'},      # Top pipes need opposite rotation (pointing down towards plant)
+                {'offset': (0, -3), 'required_rotation': 8, 'side': 'top-right'},
+                # {'offset': (-1, 3), 'required_rotation': 0, 'side': 'bottom-left'},    # Bottom pipes need same rotation (pointing up towards plant)
+                {'offset': (0, 3), 'required_rotation': 0, 'side': 'bottom-right'}
+            ]
+        elif rotation == 4:  # East (arrow pointing right)
+            pipe_connections = [
+                # {'offset': (3, -2), 'required_rotation': 12, 'side': 'right-top'},      # Right pipes need opposite rotation (pointing left towards plant)
+                {'offset': (3, 0), 'required_rotation': 12, 'side': 'right-bottom'},
+                # {'offset': (-3, -1), 'required_rotation': 4, 'side': 'left-top'},       # Left pipes need same rotation (pointing right towards plant)
+                {'offset': (-3, 0), 'required_rotation': 4, 'side': 'left-bottom'}
+            ]
+        elif rotation == 8:  # South (arrow pointing down)
+            pipe_connections = [
+                # {'offset': (1, 3), 'required_rotation': 0, 'side': 'bottom-right'},     # Bottom pipes need opposite rotation (pointing up towards plant)
+                # {'offset': (-1, 3), 'required_rotation': 0, 'side': 'bottom-left'},
+                # {'offset': (2, -3), 'required_rotation': 8, 'side': 'top-right'},       # Top pipes need same rotation (pointing down towards plant)
+                # {'offset': (-2, -3), 'required_rotation': 8, 'side': 'top-left'}
+            ]
+        elif rotation == 12:  # West (arrow pointing left)
+            pipe_connections = [
+                # {'offset': (-3, 1), 'required_rotation': 4, 'side': 'left-bottom'},     # Left pipes need opposite rotation (pointing right towards plant)
+                # {'offset': (-3, -1), 'required_rotation': 4, 'side': 'left-top'},
+                # {'offset': (3, 2), 'required_rotation': 12, 'side': 'right-bottom'},    # Right pipes need same rotation (pointing left towards plant)
+                # {'offset': (3, -2), 'required_rotation': 12, 'side': 'right-top'}
+            ]
+
+        # Check each pipe connection point
+        for connection in pipe_connections:
+            offset_x, offset_y = connection['offset']
+            required_rotation = connection['required_rotation']
+            side = connection['side']
+
+            check_x = x + offset_x
+            check_y = y + offset_y
+            print(f"  Checking {side} at: x: {check_x}, y: {check_y}")
+
+            pipe = coord_lookup.get((check_x, check_y))
+
+            if pipe:
+                # If it's a regular pipe, always connect
+                if pipe['machine_name'] == 'pipe':
+                    edges.append({
+                        "from_name": pipe['machine_name'],
+                        "from_x": check_x,
+                        "from_y": check_y,
+                        "to_name": machine['machine_name'],
+                        "to_x": x,
+                        "to_y": y
+                    })
+                    print(
+                        f"    ✓ Found pipe connection: {pipe['machine_name']}({check_x},{check_y}) -> oil-refinery({x},{y})")
+
+                # If it's pipe-to-ground, check rotation
+                elif pipe['machine_name'] == 'pipe-to-ground':
+                    if pipe['rotation'] == required_rotation:
+                        edges.append({
+                            "from_name": pipe['machine_name'],
+                            "from_x": check_x,
+                            "from_y": check_y,
+                            "to_name": machine['machine_name'],
+                            "to_x": x,
+                            "to_y": y
+                        })
+                        print(
+                            f"    ✓ Found pipe-to-ground connection: {pipe['machine_name']}({check_x},{check_y}) rotation {pipe['rotation']} -> oil-refinery({x},{y})")
+                    else:
+                        print(
+                            f"    ✗ pipe-to-ground rotation mismatch: expected {required_rotation}, got {pipe['rotation']}")
+
+    return edges
+
+
+def find_boiler_pipe_edges(machine_list):
+    edges = []
+    coord_lookup = {}
+    for m in machine_list:
+        if m['machine_name'] in ('pipe', 'pipe-to-ground'):
+            coord_lookup[(m['x'], m['y'])] = m
+    for machine in machine_list:
+        if machine['machine_name'] != 'boiler':
+            continue
+
+        x, y, rotation = machine['x'], machine['y'], machine['rotation']
+        print(f"\n=== oil-refinery at x: {x}, y: {y}, rotation: {rotation} ===")
+
+        pipe_connections = []
+
+        if rotation == 0:  # North (arrow pointing up)
+            pipe_connections = [
+                {'offset': (0, -1.5), 'required_rotation': 8, 'side': 'top'},
+                # Top pipe needs opposite rotation (pointing down towards plant)
+                {'offset': (2, 0), 'required_rotation': 12, 'side': 'right'},
+                # Right pipe needs rotation 12 (pointing left)
+                {'offset': (-2, 0), 'required_rotation': 4, 'side': 'left'},
+                # Left pipe needs rotation 4 (pointing right)
+            ]
+        elif rotation == 4:  # East (arrow pointing right)
+            pipe_connections = [
+                {'offset': (2, 0), 'required_rotation': 12, 'side': 'right'},
+                # Right pipe needs opposite rotation (pointing left towards plant)
+                {'offset': (0, 2), 'required_rotation': 0, 'side': 'bottom'},
+                # Bottom pipe needs rotation 0 (pointing up)
+                {'offset': (0, -2), 'required_rotation': 8, 'side': 'top'},  # Top pipe needs rotation 8 (pointing down)
+            ]
+        elif rotation == 8:  # South (arrow pointing down)
+            pipe_connections = [
+                {'offset': (0, 2), 'required_rotation': 0, 'side': 'bottom'},
+                # Bottom pipe needs opposite rotation (pointing up towards plant)
+                {'offset': (-2, 0), 'required_rotation': 4, 'side': 'left'},
+                # Left pipe needs rotation 4 (pointing right)
+                {'offset': (2, 0), 'required_rotation': 12, 'side': 'right'},
+                # Right pipe needs rotation 12 (pointing left)
+            ]
+        elif rotation == 12:  # West (arrow pointing left)
+            pipe_connections = [
+                {'offset': (-2, 0), 'required_rotation': 4, 'side': 'left'},
+                # Left pipe needs opposite rotation (pointing right towards plant)
+                {'offset': (0, -2), 'required_rotation': 8, 'side': 'top'},  # Top pipe needs rotation 8 (pointing down)
+                {'offset': (0, 2), 'required_rotation': 0, 'side': 'bottom'},
+                # Bottom pipe needs rotation 0 (pointing up)
+            ]
+
+        # Check each pipe connection point
+        for connection in pipe_connections:
+            offset_x, offset_y = connection['offset']
+            required_rotation = connection['required_rotation']
+            side = connection['side']
+
+            check_x = x + offset_x
+            check_y = y + offset_y
+            print(f"  Checking {side} at: x: {check_x}, y: {check_y}")
+
+            pipe = coord_lookup.get((check_x, check_y))
+
+            if pipe:
+                # If it's a regular pipe, always connect
+                if pipe['machine_name'] == 'pipe':
+                    edges.append({
+                        "from_name": pipe['machine_name'],
+                        "from_x": check_x,
+                        "from_y": check_y,
+                        "to_name": machine['machine_name'],
+                        "to_x": x,
+                        "to_y": y
+                    })
+                    print(
+                        f"    ✓ Found pipe connection: {pipe['machine_name']}({check_x},{check_y}) -> boiler({x},{y})")
+
+                # If it's pipe-to-ground, check rotation
+                elif pipe['machine_name'] == 'pipe-to-ground':
+                    if pipe['rotation'] == required_rotation:
+                        edges.append({
+                            "from_name": pipe['machine_name'],
+                            "from_x": check_x,
+                            "from_y": check_y,
+                            "to_name": machine['machine_name'],
+                            "to_x": x,
+                            "to_y": y
+                        })
+                        print(
+                            f"    ✓ Found pipe-to-ground connection: {pipe['machine_name']}({check_x},{check_y}) rotation {pipe['rotation']} -> boiler({x},{y})")
+                    else:
+                        print(
+                            f"    ✗ pipe-to-ground rotation mismatch: expected {required_rotation}, got {pipe['rotation']}")
+
+    return edges
+
+
 # --- Find edges ---
 # 1️⃣ Transport belts (including fast belts)
 edges1 = find_edges(
@@ -251,7 +772,7 @@ edges4 = find_edges(
     is_underground_belt=True
 )
 
-# 5️⃣ Inserter connections (special handling)
+# 5️⃣ Inserter connections (special handling - includes long-handed)
 edges5 = find_edges(
     machines,
     check_from=('inserter', 'fast-inserter', 'long-handed-inserter', 'stack-inserter'),
@@ -259,8 +780,29 @@ edges5 = find_edges(
     is_inserter=True
 )
 
+# 6️⃣ Pipe-to-ground pairs (opposite rotations)
+edges6 = find_edges(
+    machines,
+    check_from=('pipe-to-ground',),
+    check_to=('pipe-to-ground',),
+    max_distance=9,
+    is_pipe_to_ground=True
+)
+
+# 7️⃣ Pipe-to-pipe connections (+ shape, deduplicated)
+edges7 = find_pipe_edges(machines)
+
+# 8️⃣ Chemical plant to pipe connections
+edges8 = find_chemical_plant_pipe_edges(machines)
+
+edges9 = find_oil_ref_pipe_edges(machines)
+
+edges10 = find_steam_engine_pipe_edges(machines)
+
+edges11 = find_boiler_pipe_edges(machines)
+
 # Combine all edges
-all_edges = edges1 + edges2 + edges3 + edges4 + edges5
+all_edges = edges1 + edges2 + edges3 + edges4 + edges5 + edges6 + edges7 + edges8 + edges9 + edges10 + edges11
 
 # --- Output edges ---
 print("\n=== ALL EDGES ===")
