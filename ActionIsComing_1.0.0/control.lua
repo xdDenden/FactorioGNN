@@ -1,5 +1,4 @@
 -- control.lua
-local json = require("json")
 
 local moving_characters = {}
 
@@ -190,6 +189,41 @@ commands.add_command("build", "", function(event)
   end
 end)
 
+commands.add_command("rotate", "Rotate building at position: /rotate <x> <y> <direction(0-3)>", function(event)
+    local params = {}
+    for param in string.gmatch(event.parameter or "", "%S+") do
+        table.insert(params, param)
+    end
+
+    local x = tonumber(params[1])
+    local y = tonumber(params[2])
+    local dir_input = tonumber(params[3]) or 0
+
+    local direction = dir_input * 2
+
+    local surface = game.surfaces[1]
+
+    --find entity at position
+    local entities = surface.find_entities_filtered{
+        position = {x, y},
+        radius = 0.5
+    }
+
+    if #entities == 0 then
+        game.print("No entity found at (" .. x .. ", " .. y .. ")")
+        return
+    end
+
+    local entity = entities[1]
+
+    if not entity.supports_direction then
+        game.print(entity.name .. " is not rotatable!")
+        return
+    end
+    --set direction
+    entity.direction = direction
+    game.print("Rotated " .. entity.name .. " at (" .. x .. ", " .. y .. ") to direction " .. dir_input)
+end)
 
 --Spawn a new Character(AI)
 --/spawn
@@ -400,90 +434,78 @@ end)
 -- Gives character information
 -- Position and Inventory
 commands.add_command("char_info", "", function(event)
-    local player = nil
+  local player = nil
+  
+  -- Check if the command was run by a player or the server
+  if event.player_index then
+    player = game.players[event.player_index]
+  end
 
-    -- Check if the command was run by a player or the server
-    if event.player_index then
-        player = game.players[event.player_index]
-    end
-
-    -- Helper function to print to the correct target (Player or Server Console)
-    local function output(msg)
-        if player then
-            player.print(msg)
-        else
-            game.print(msg) -- Prints to everyone/console if run by server
-        end
-    end
-
-    local surface = game.surfaces[1]
-
-    -- Find AI Character
-    local ai_characters = surface.find_entities_filtered{
-        name = "character",
-        force = "AI"
-    }
-
-    if #ai_characters == 0 then
-        output("No AI Character found.")
-        return
-    end
-
-    local character = ai_characters[1]
-
-    -- Output Position
-    local pos = character.position
-    output("Position: x=" .. pos.x .. ", y=" .. pos.y)
-
-
-    -- Check Inventory
-    local inventory = character.get_main_inventory()
-
-    if not inventory then
-        output("  - No Inventory")
-        return
-    end
-
-    local slot_count = #inventory
-
-    if inventory.is_empty() then
-        output("  - Empty")
+  -- Helper function to print to the correct target (Player or Server Console)
+  local function output(msg)
+    if player then
+      player.print(msg)
     else
-        -- Collect all items
-        local item_counts = {}
-
-        for i = 1, slot_count do
-            local stack = inventory[i]
-            if stack.valid_for_read then
-                local name = stack.name
-                local count = stack.count
-
-                if item_counts[name] then
-                    item_counts[name] = item_counts[name] + count
-                else
-                    item_counts[name] = count
-                end
-            end
-        end
-
-        -- Output
-        local inventoryOutput = {}
-
-        for item_name, total_count in pairs(item_counts) do
-            output("  - " .. item_name .. ": " .. total_count)
-            table.insert(inventoryOutput, {name = item_name, count = total_count})
-        end
-
-        local outputstring = json.encode({
-            pos = pos,
-            inventory = inventoryOutput
-        })
-
-        rcon.print(outputstring)
-
+      game.print(msg) -- Prints to everyone/console if run by server
     end
+  end
 
+  local surface = game.surfaces[1]
+  
+  -- Find AI Character
+  local ai_characters = surface.find_entities_filtered{
+    name = "character",
+    force = "AI"
+  }
+  
+  if #ai_characters == 0 then
+    output("No AI Character found.")
+    return
+  end
+
+  local character = ai_characters[1]
+  
+  -- Output Position
+  local pos = character.position
+  output("Position: x=" .. pos.x .. ", y=" .. pos.y)
+  
+  -- Check Inventory
+  local inventory = character.get_main_inventory()
+  
+  if not inventory then
+    output("  - No Inventory")
+    return
+  end
+  
+  local slot_count = #inventory
+  
+  if inventory.is_empty() then
+    output("  - Empty")
+  else
+    -- Collect all items
+    local item_counts = {}
+    
+    for i = 1, slot_count do
+      local stack = inventory[i]
+      if stack.valid_for_read then
+        local name = stack.name
+        local count = stack.count
+        
+        if item_counts[name] then
+          item_counts[name] = item_counts[name] + count
+        else
+          item_counts[name] = count
+        end
+      end
+    end
+    
+    -- Output
+    for item_name, total_count in pairs(item_counts) do
+      output("  - " .. item_name .. ": " .. total_count)
+    end
+  end
 end)
+
 --Insert items from the character into a machine
 --/insert x y <itemindex(1-52)> <amount>
 commands.add_command("insert_into", "AI Character inserts items into machine: /insert <item_id> <count> <x> <y>", function(event)
@@ -714,4 +736,3 @@ commands.add_command("take", "Take items from machine: /take <x> <y>", function(
         game.print("No items found in " .. machine.name .. " at (" .. x .. ", " .. y .. ")")
     end
 end)
-

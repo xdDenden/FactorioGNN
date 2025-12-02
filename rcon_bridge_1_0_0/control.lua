@@ -24,7 +24,8 @@ local function scan_entities()
 			"offshore-pump",
 			"pipe",
 			"pipe-to-ground",
-			"electric-pole"
+			"electric-pole",
+            "splitter"
 		}
 	}
     
@@ -39,7 +40,7 @@ local function scan_entities()
         
         --Assembling Machine1
         if entity.name == "assembling-machine-1" then
-			entity_data.status = entity.status or "None" --active state
+			entity_data.status = entity.status or 0 --active state
 			--entity_data.rotation = entity.direction or "None" --rotation
 			entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
 			entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
@@ -49,17 +50,17 @@ local function scan_entities()
         end
 		
 		if entity.name == "oil-refinery" then
-			entity_data.status = entity.status or "None" --active state
+			entity_data.status = entity.status or 0 --active state
 			entity_data.rotation = entity.direction or "None" --rotation
 			--entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
-			--entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
-			--entity_data.is_crafting = entity.is_crafting() or "False" --is crafting?
-			--entity_data.products_finished = entity.products_finished or "None" --products finished
+			entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
+			entity_data.is_crafting = entity.is_crafting() or "False" --is crafting?
+			entity_data.products_finished = entity.products_finished or "None" --products finished
 			--entity_data.mining_target = entity.mining_target and entity.mining_target.name or "none"		
 		end
 		
 		if entity.name == "chemical-plant" then
-			entity_data.status = entity.status or "None" --active state
+			entity_data.status = entity.status or 0 --active state
 			entity_data.rotation = entity.direction or "None" --rotation
 			entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
 			entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
@@ -70,7 +71,7 @@ local function scan_entities()
 		
 		--Stone Furnace
         if entity.name == "furnace" then
-			entity_data.status = entity.status or "None" --active state
+			entity_data.status = entity.status or 0 --active state
 			--entity_data.rotation = entity.direction or "None" --rotation
 			entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
 			entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
@@ -81,7 +82,7 @@ local function scan_entities()
 		
 		--Burner Miner
         if entity.type == "mining-drill" then
-			entity_data.status = entity.status or "None" --active state
+			entity_data.status = entity.status or 0 --active state
 			entity_data.rotation = entity.direction or "None" --rotation
 			entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
 			--entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
@@ -113,7 +114,7 @@ local function scan_entities()
 		end
 		
 		if entity.type == "inserter" then
-			entity_data.status = entity.status or "None" --active state
+			entity_data.status = entity.status or 0 --active state
 			entity_data.rotation = entity.direction or "None" --rotation
 			entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
 			--entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
@@ -123,7 +124,7 @@ local function scan_entities()
 		end
 		
 		if entity.name == "boiler" then
-			entity_data.status = entity.status or "None" --active state
+			entity_data.status = entity.status or 0 --active state
 			entity_data.rotation = entity.direction or "None" --rotation
 			--entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
 			--entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
@@ -133,7 +134,7 @@ local function scan_entities()
 		end
 		
 		if entity.name == "steam-engine" then
-			entity_data.status = entity.status or "None" --active state
+			entity_data.status = entity.status or 0 --active state
 			entity_data.rotation = entity.direction or "None" --rotation
 			--entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
 			--entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
@@ -143,7 +144,7 @@ local function scan_entities()
 		end
 		
 		if entity.name == "lab" then
-			entity_data.status = entity.status or "None" --active state
+			entity_data.status = entity.status or 0 --active state
 			--entity_data.rotation = entity.direction or "None" --rotation
 			entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
 			--entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
@@ -153,7 +154,7 @@ local function scan_entities()
 		end
 		
 		if entity.name == "offshore-pump" then
-			entity_data.status = entity.status or "None" --active state
+			entity_data.status = entity.status or 0 --active state
 			entity_data.rotation = entity.direction or "None" --rotation
 			--entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
 			--entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
@@ -174,7 +175,7 @@ local function scan_entities()
 		
 		if entity.name == "pipe-to-ground" then
 			--entity_data.status = entity.status or "None" --active state
-			--entity_data.rotation = entity.direction or "None" --rotation
+			entity_data.rotation = entity.direction or "None" --rotation
 			--entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
 			--entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
 			--entity_data.is_crafting = entity.is_crafting() or "False" --is crafting?
@@ -183,7 +184,7 @@ local function scan_entities()
 		end
 		
 		if entity.type == "electric-pole" then
-			--entity_data.status = entity.status or "None" --active state
+			--entity_data.status = entity.status or 0 --active state
 			--entity_data.rotation = entity.direction or "None" --rotation
 			--entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
 			--entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
@@ -222,7 +223,8 @@ local function scan_entities_boundingboxes()
 			"offshore-pump",
 			"pipe",
 			"pipe-to-ground",
-			"electric-pole"
+			"electric-pole",
+            "splitter"
 		}
 	}
 	

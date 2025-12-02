@@ -45,8 +45,7 @@ if __name__ == "__main__":
         # 1. Parse raw dicts into Entity objects
         # We need this original list for coordinates
         entities = [parse_entity(e['machine_name'], e) for e in raw_entities]
-        #Edging.translateEntitesToEdges(receiver)
-
+        print(Edging.translateEntitesToEdges(receiver))
         # Calculate bounds once, covering both entities and player position
         bounds = compute_bounds(entities, char_info=raw_playerInfo)
 

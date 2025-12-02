@@ -148,6 +148,12 @@ class Rcon_reciever:
         else:
             return False
 
+    def rotate(self, x: float, y: float, direction: int) -> None:
+        if not self._rcon:
+            raise RuntimeError("Not connected. Call connect() first.")
+        self._rcon.command(f"/rotate {x} {y} {direction} ")
+
+
 if __name__ == "__main__":
     receiver =  Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
     try:

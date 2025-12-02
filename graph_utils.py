@@ -6,85 +6,14 @@ import urllib.request
 import urllib.parse
 import ssl
 import base64
-from typing import Union, Sequence
+from typing import Union, Sequence, List, Dict, Any
 
-
-"""Deprecated Function we keep around for Lookup purposes and was only used as a starting off point"""
-def save_graph_ml(G, labels: Union[Sequence, 'torch.Tensor'], label_name: str, save_path: str):
-    """
-    Attach node labels (predicted or true) to a copy of G and write as GraphML.
-    labels: 1D tensor/list/array aligned with integer node ids.
-    """
-    # Accept torch tensor without importing torch at module top to stay lightweight
-    try:
-        import torch
-        if isinstance(labels, torch.Tensor):
-            labels_list = labels.view(-1).tolist()
-        else:
-            labels_list = list(labels)
-    except ImportError:
-        labels_list = list(labels)
-
-    G_copy = G.copy()
-    for i, node in enumerate(G_copy.nodes()):
-        if i < len(labels_list):
-            G_copy.nodes[node][label_name] = str(int(labels_list[i]))
-        else:
-            G_copy.nodes[node][label_name] = "0"
-    nx.write_graphml(G_copy, save_path)
-    print(f"Saved graph to {save_path}")
-
-"""New Function to create GraphML with embedded images from the RCON reciever. This is easier then accessing the world each ai is building in and
-allows us to do graph and score analysis without opening the game at larger scales.
-Also this allows us to take a more methodical approach to analysing a specific factory. 
-This data is from the exampleFactory savefile and can be replace with the file generated from any other rconreciever Output
-
-The Images get embedded into the graph because yEd is weird sometimes. This ensures it working."""
-data = [{'machine_name': 'transport-belt', 'x': -28.5, 'y': -26.5, 'rotation': 12},
-        {'machine_name': 'express-transport-belt', 'x': -26.5, 'y': -26.5, 'rotation': 12},
-        {'machine_name': 'fast-transport-belt', 'x': -27.5, 'y': -26.5, 'rotation': 8},
-        {'machine_name': 'turbo-transport-belt', 'x': -25.5, 'y': -26.5, 'rotation': 0},
-        {'machine_name': 'inserter', 'x': -20.5, 'y': -26.5, 'status': 54, 'rotation': 0, 'energy': 'False'},
-        {'machine_name': 'burner-inserter', 'x': -21.5, 'y': -26.5, 'status': 32, 'rotation': 0, 'energy': 'True'},
-        {'machine_name': 'steam-engine', 'x': -16.5, 'y': -26.5, 'status': 5, 'rotation': 0},
-        {'machine_name': 'offshore-pump', 'x': -5.5, 'y': -27.5, 'status': 1, 'rotation': 8},
-        {'machine_name': 'pipe', 'x': -3.5, 'y': -26.5}, {'machine_name': 'small-electric-pole', 'x': -0.5, 'y': -26.5},
-        {'machine_name': 'pipe-to-ground', 'x': -1.5, 'y': -26.5, 'rotation': 8},
-        {'machine_name': 'medium-electric-pole', 'x': 0.5, 'y': -26.5},
-        {'machine_name': 'assembling-machine-1', 'x': -46.5, 'y': -25.5, 'status': 54, 'energy': 'False',
-         'recipe_name': 'advanced-circuit', 'is_crafting': 'False', 'products_finished': 0},
-        {'machine_name': 'assembling-machine-2', 'x': -43.5, 'y': -25.5, 'status': 54, 'energy': 'False',
-         'recipe_name': 'iron-gear-wheel', 'is_crafting': 'False', 'products_finished': 0},
-        {'machine_name': 'assembling-machine-3', 'x': -40.5, 'y': -25.5, 'status': 54, 'energy': 'False',
-         'recipe_name': 'electronic-circuit', 'is_crafting': 'False', 'products_finished': 0},
-        {'machine_name': 'stone-furnace', 'x': -38, 'y': -26, 'status': 53, 'energy': 'False',
-         'recipe_name': 'No Recipe', 'is_crafting': 'False', 'products_finished': 0},
-        {'machine_name': 'steel-furnace', 'x': -36, 'y': -26, 'status': 53, 'energy': 'False',
-         'recipe_name': 'No Recipe', 'is_crafting': 'False', 'products_finished': 0},
-        {'machine_name': 'burner-mining-drill', 'x': -34, 'y': -26, 'status': 53, 'rotation': 8, 'energy': 'False',
-         'mining_target': 'iron-ore'},
-        {'machine_name': 'electric-mining-drill', 'x': -30.5, 'y': -25.5, 'status': 54, 'rotation': 8,
-         'energy': 'False', 'mining_target': 'iron-ore'},
-        {'machine_name': 'underground-belt', 'x': -28.5, 'y': -25.5, 'rotation': 8},
-        {'machine_name': 'express-underground-belt', 'x': -26.5, 'y': -25.5, 'rotation': 8},
-        {'machine_name': 'fast-underground-belt', 'x': -27.5, 'y': -25.5, 'rotation': 8},
-        {'machine_name': 'turbo-underground-belt', 'x': -25.5, 'y': -25.5, 'rotation': 0},
-        {'machine_name': 'chemical-plant', 'x': -23.5, 'y': -25.5, 'status': 54, 'rotation': 8, 'energy': 'False',
-         'recipe_name': 'heavy-oil-cracking', 'is_crafting': 'False', 'products_finished': 0},
-        {'machine_name': 'bulk-inserter', 'x': -21.5, 'y': -24.5, 'status': 54, 'rotation': 0, 'energy': 'False'},
-        {'machine_name': 'fast-inserter', 'x': -20.5, 'y': -25.5, 'status': 54, 'rotation': 0, 'energy': 'False'},
-        {'machine_name': 'long-handed-inserter', 'x': -21.5, 'y': -25.5, 'status': 54, 'rotation': 0,
-         'energy': 'False'}, {'machine_name': 'boiler', 'x': -19, 'y': -25.5, 'status': 53, 'rotation': 12},
-        {'machine_name': 'oil-refinery', 'x': -12.5, 'y': -25.5, 'status': 54, 'rotation': 8, 'energy': 'False',
-         'recipe_name': 'coal-liquefaction'},
-        {'machine_name': 'lab', 'x': -8.5, 'y': -25.5, 'status': 20, 'energy': 'True'},
-        {'machine_name': 'pipe', 'x': -3.5, 'y': -24.5}, {'machine_name': 'pipe', 'x': -3.5, 'y': -25.5},
-        {'machine_name': 'pipe-to-ground', 'x': -1.5, 'y': -25.5, 'rotation': 0},
-        {'machine_name': 'big-electric-pole', 'x': 2, 'y': -26}, {'machine_name': 'substation', 'x': 4, 'y': -26},
-        {'machine_name': 'splitter', 'x': -28.5, 'y': -24, 'rotation': 12},
-        {'machine_name': 'express-splitter', 'x': -26.5, 'y': -24, 'rotation': 12},
-        {'machine_name': 'fast-splitter', 'x': -27.5, 'y': -24, 'rotation': 12},
-        {'machine_name': 'turbo-splitter', 'x': -25.5, 'y': -24, 'rotation': 12}]
+# --- IMPORTS FOR LIVE FETCHING ---
+try:
+    import Edging
+    from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
+except ImportError:
+    print("Warning: Could not import 'Edging' or 'rcon_bridge'. Ensure they are in the python path.")
 
 # --- CONFIG ---
 # Factorio tile = 1 unit. Scale up for graph pixels.
@@ -101,7 +30,6 @@ resources_map = {}
 
 def get_base64_image(machine_name):
     """Downloads image, returns base64 string. Caches results."""
-
     if machine_name in resources_map:
         return resources_map[machine_name]
 
@@ -109,6 +37,8 @@ def get_base64_image(machine_name):
     if "turbo" in machine_name:
         fallback_name = machine_name.replace("turbo", "express")
         formatted_name = fallback_name.replace('-', '_').capitalize()
+    if "long-handed-inserter" in machine_name:
+        formatted_name = "Long-handed_inserter"
     else:
         formatted_name = machine_name.replace('-', '_').capitalize()
 
@@ -128,68 +58,169 @@ def get_base64_image(machine_name):
         return None
 
 
-# --- GRAPHML PARTS ---
+"""Deprecated Function we keep around for Lookup purposes"""
 
-header = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+
+def save_graph_ml(G, labels: Union[Sequence, 'torch.Tensor'], label_name: str, save_path: str):
+    """
+    Attach node labels (predicted or true) to a copy of G and write as GraphML.
+    labels: 1D tensor/list/array aligned with integer node ids.
+    """
+    try:
+        import torch
+        if isinstance(labels, torch.Tensor):
+            labels_list = labels.view(-1).tolist()
+        else:
+            labels_list = list(labels)
+    except ImportError:
+        labels_list = list(labels)
+
+    G_copy = G.copy()
+    for i, node in enumerate(G_copy.nodes()):
+        if i < len(labels_list):
+            G_copy.nodes[node][label_name] = str(int(labels_list[i]))
+        else:
+            G_copy.nodes[node][label_name] = "0"
+    nx.write_graphml(G_copy, save_path)
+    print(f"Saved graph to {save_path}")
+
+
+def create_factorio_graphml(nodes: List[Dict[str, Any]], edges: List[Dict[str, Any]],
+                            file_name: str = 'yED_Factory.graphml'):
+    """
+    Generates a GraphML file compatible with yEd, containing embedded images for nodes
+    and directed edges based on the logic from Edging.py.
+    """
+
+    # --- GRAPHML HEADER ---
+    header = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <graphml xmlns="http://graphml.graphdrawing.org/xmlns" 
     xmlns:y="http://www.yworks.com/xml/graphml" 
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
     xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://www.yworks.com/xml/schema/graphml/1.1/ygraphml.xsd">
   <key for="node" id="d_graphics" yfiles.type="nodegraphics"/>
+  <key for="edge" id="d_edge_graphics" yfiles.type="edgegraphics"/>
   <key for="graphml" id="d_resources" yfiles.type="resources"/>
   <graph edgedefault="directed" id="G">
 """
 
-nodes_xml = ""
+    nodes_xml = ""
+    # Coordinate lookup to map (x, y) -> "n0", "n1", etc.
+    coord_to_id = {}
 
-for i, entity in enumerate(data):
-    machine_name = entity.get('machine_name', 'unknown')
+    print(f"Generating XML for {len(nodes)} nodes...")
+    for i, entity in enumerate(nodes):
+        machine_name = entity.get('machine_name', 'unknown')
 
-    # Prefetch the image data to populate resources_map
-    get_base64_image(machine_name)
+        # Prefetch image
+        get_base64_image(machine_name)
 
-    x_pos = entity.get('x', 0) * scale_factor
-    y_pos = entity.get('y', 0) * scale_factor
+        x = entity.get('x', 0)
+        y = entity.get('y', 0)
 
-    label = machine_name
-    if 'recipe_name' in entity and entity['recipe_name'] != 'No Recipe':
-        label += f"\n({entity['recipe_name']})"
+        # Store mapping for edge generation
+        coord_to_id[(x, y)] = f"n{i}"
 
-    # In yEd, we reference the resource by ID (we will use machine_name as ID)
-    nodes_xml += f"""
+        x_pos = x * scale_factor
+        y_pos = y * scale_factor
+
+        label = machine_name
+        if 'recipe_name' in entity and entity['recipe_name'] != 'No Recipe':
+            label += f"\n({entity['recipe_name']})"
+
+        nodes_xml += f"""
     <node id="n{i}">
       <data key="d_graphics">
         <y:ImageNode>
           <y:Geometry height="50.0" width="50.0" x="{x_pos}" y="{y_pos}"/>
           <y:Fill color="#FFFFFF" transparent="true"/>
           <y:BorderStyle hasColor="false" type="line" width="1.0"/>
-          <y:NodeLabel visible="true" alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="plain" modelName="sandwich" modelPosition="s">{label}</y:NodeLabel>
+          <y:NodeLabel visible="true" alignment="center" autoSizePolicy="content" fontFamily="Dialog" fontSize="12" fontStyle="plain" modelName="sandwich" modelPosition="s">{html.escape(label)}</y:NodeLabel>
           <y:Image alphaImage="true" refid="{machine_name}"/>
         </y:ImageNode>
       </data>
     </node>"""
 
-# --- CONSTRUCT RESOURCE BLOCK ---
-# This block holds the actual image data encoded in base64
-resources_xml = "<data key=\"d_resources\">\n<y:Resources>\n"
+    edges_xml = ""
+    print(f"Generating XML for {len(edges)} edges...")
 
-for name, b64_data in resources_map.items():
-    if b64_data:
-        resources_xml += f"""<y:Resource id="{name}" type="java.awt.image.BufferedImage" xml:space="preserve">{b64_data}</y:Resource>\n"""
+    for i, edge in enumerate(edges):
+        # Extract coordinates from Edging.py format
+        src_coord = (edge['from_x'], edge['from_y'])
+        tgt_coord = (edge['to_x'], edge['to_y'])
 
-resources_xml += "</y:Resources>\n</data>\n"
+        # Check if both nodes exist in our node list
+        if src_coord in coord_to_id and tgt_coord in coord_to_id:
+            src_id = coord_to_id[src_coord]
+            tgt_id = coord_to_id[tgt_coord]
 
-footer = """
+            # Create yEd styled edge with standard arrow
+            edges_xml += f"""
+    <edge id="e{i}" source="{src_id}" target="{tgt_id}">
+      <data key="d_edge_graphics">
+        <y:PolyLineEdge>
+          <y:Path sx="0.0" sy="0.0" tx="0.0" ty="0.0"/>
+          <y:LineStyle color="#000000" type="line" width="1.0"/>
+          <y:Arrows source="none" target="standard"/>
+          <y:BendStyle smoothed="false"/>
+        </y:PolyLineEdge>
+      </data>
+    </edge>"""
+
+    # --- RESOURCES BLOCK ---
+    resources_xml = "<data key=\"d_resources\">\n<y:Resources>\n"
+    for name, b64_data in resources_map.items():
+        if b64_data:
+            resources_xml += f"""<y:Resource id="{name}" type="java.awt.image.BufferedImage" xml:space="preserve">{b64_data}</y:Resource>\n"""
+    resources_xml += "</y:Resources>\n</data>\n"
+
+    footer = """
   </graph>
   %s
 </graphml>
 """ % resources_xml
 
-# --- WRITE FILE ---
-file_name = 'yED_Factory.graphml'
-#best ml editor for this is the yEd Graph Editor: https://www.yworks.com/products/yed
-with open(file_name, 'w') as f:
-    f.write(header + nodes_xml + footer)
+    # --- WRITE FILE ---
+    with open(file_name, 'w') as f:
+        f.write(header + nodes_xml + edges_xml + footer)
 
-print("-" * 30)
-print(f"Success! Created '{file_name}'")
+    print("-" * 30)
+    print(f"Success! Created '{file_name}' with {len(nodes)} nodes and {len(edges)} edges.")
+
+
+# --- MAIN EXECUTION ---
+if __name__ == "__main__":
+    # 1. Setup Connection
+    # Uses default host="localhost", port=27015, password="eenie7Uphohpaim" from rcon_bridge.py
+    receiver = Rcon_reciever()
+
+    try:
+        print("Connecting to Factorio RCON...")
+        receiver.connect()
+
+        # 2. Fetch Nodes (Entities)
+        print("Scanning entities...")
+        nodes_data = receiver.scan_entities_boundingboxes()
+
+        if not nodes_data:
+            print("No entities found in the scan area.")
+        else:
+            print(f"Found {len(nodes_data)} entities.")
+
+            # 3. Fetch Edges (Logic from Edging.py)
+            # Note: This calls scan_entities_boundingboxes internally again,
+            # but ensures we use the exact logic defined in Edging.py
+            print("Calculating edges...")
+            edges_data = Edging.translateEntitesToEdges(receiver)
+
+            if edges_data is None:
+                edges_data = []
+
+            # 4. Generate GraphML
+            create_factorio_graphml(nodes_data, edges_data, 'yED_Factory.graphml')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    finally:
+        receiver.disconnect()
+        print("RCON disconnected.")
