@@ -45,7 +45,7 @@ if __name__ == "__main__":
         # 1. Parse raw dicts into Entity objects
         # We need this original list for coordinates
         entities = [parse_entity(e['machine_name'], e) for e in raw_entities]
-        Edging.translateEntitesToEdges(receiver)
+        #Edging.translateEntitesToEdges(receiver)
 
         # Calculate bounds once, covering both entities and player position
         bounds = compute_bounds(entities, char_info=raw_playerInfo)
@@ -74,11 +74,19 @@ if __name__ == "__main__":
         model = FactorioHGNN()
         model.eval()  # Set to evaluation mode
 
-        with torch.no_grad():
-            action_idx, item_idx, rotation_idx, heatmap = model(node_features, H)
+        # 5. Instantiate and run the model
+        model = FactorioHGNN()
+        model.eval()  # Set to evaluation mode
 
+        # The model returns logits (raw scores) for each output head.
+        action_logits, item_logits, rotation_logits, heatmap, _ = model(node_features, H)
 
-        # 1. Find the flat index of the maximum value
+        # Get the predicted index by finding the max logit value.
+        # .item() extracts the scalar value from the tensor.
+        action_idx = torch.argmax(action_logits).item()
+        item_idx = torch.argmax(item_logits).item()
+        rotation_idx = torch.argmax(rotation_logits).item()
+
         flat_max_idx = torch.argmax(heatmap)
 
         y_grid_idx = (flat_max_idx // 17).item()
@@ -94,6 +102,7 @@ if __name__ == "__main__":
         # bounds structure is: [min_x, max_x, min_y, max_y]
         final_x = unnormalize_coord(x_norm, bounds[0], bounds[1])
         final_y = unnormalize_coord(y_norm, bounds[2], bounds[3])
+
 
         print("\n--- Model Ran Successfully ---")
         print(f"Predicted heatmap index: [{x_grid_idx}, {y_grid_idx}]")

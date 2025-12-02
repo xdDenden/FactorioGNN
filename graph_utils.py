@@ -187,6 +187,7 @@ footer = """
 
 # --- WRITE FILE ---
 file_name = 'yED_Factory.graphml'
+#best ml editor for this is the yEd Graph Editor: https://www.yworks.com/products/yed
 with open(file_name, 'w') as f:
     f.write(header + nodes_xml + footer)
 
