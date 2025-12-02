@@ -89,28 +89,23 @@ def map_items(char_info: CharInfo, bounds: Tuple[int, int, int, int]) -> Dict[st
 
 # --- Feature Transformation ---
 
-def compute_bounds(entities: List[Entity], char_info: Optional[CharInfo] = None) -> Tuple[int, int, int, int]:
-    # Collect all X and Y coordinates
-    xs = [int(e.x) for e in entities]
-    ys = [int(e.y) for e in entities]
+def compute_bounds(entities: List[Entity], char_info: Optional[CharInfo] = None, radius: int = 250) -> Tuple[
+    int, int, int, int]:
+    # 1. Determine Center Point (Player Position)
+    # Default to 0,0 if char_info is missing
+    pos = char_info.get("pos", {"x": 0, "y": 0}) if char_info else {"x": 0, "y": 0}
 
-    # If player info is provided, include player position in bounds
-    if char_info:
-        pos = char_info.get("pos", {"x": 0, "y": 0})
-        xs.append(int(pos.get("x", 0)))
-        ys.append(int(pos.get("y", 0)))
+    center_x = int(pos.get("x", 0))
+    center_y = int(pos.get("y", 0))
 
-    if not xs:
-        return (0, 1, 0, 1)
+    # REMOVED: The block that calculated the average of entities and caused the crash.
 
-    min_x, max_x = min(xs), max(xs)
-    min_y, max_y = min(ys), max(ys)
+    # 2. Calculate Bounds
+    min_x = center_x - radius
+    max_x = center_x + radius
+    min_y = center_y - radius
+    max_y = center_y + radius
 
-    # Avoid zero-range
-    if min_x == max_x:
-        max_x = min_x + 1
-    if min_y == max_y:
-        max_y = min_y + 1
     return (min_x, max_x, min_y, max_y)
 
 

@@ -33,19 +33,36 @@ def is_point_in_selection_box(px, py, selection_box):
 # ==========================================
 
 def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotation=False, check_selection_box=False,
-               is_underground_belt=False, is_inserter=False, is_pipe_to_ground=False):
+               is_underground_belt=False, is_inserter=False, is_pipe_to_ground=False, is_burner_miner=False):
     """Generic edge detection for Belts, Inserters, and simple connections."""
     edges = []
 
-    # --- INSERTER LOGIC ---
+    # ==========================================
+    # 1. INSERTER LOGIC (Optimized)
+    # ==========================================
     if is_inserter:
-        all_machines = machine_list
+        # PRE-FILTER: Create a list of only things an inserter can actually touch.
+        # This removes trees, walls, poles, and landmines from the inner loop calculations.
+        interactable_targets = []
+        for m in machine_list:
+            name = m['machine_name']
+            # Fast string checks to categorize valid targets
+            if (name.startswith('assembling') or
+                    'belt' in name or
+                    'chest' in name or
+                    'lab' in name or
+                    'furnace' in name or
+                    'chemical' in name or
+                    name in ['roboport', 'beacon', 'boiler', 'steam-engine', 'rocket-silo']):
+                interactable_targets.append(m)
+
         for machine in machine_list:
             if machine['machine_name'] not in check_from: continue
 
             x, y, rotation = machine['x'], machine['y'], machine['rotation']
-            pickup_dist = 2 if machine['machine_name'] == 'long-handed-inserter' else 1
-            drop_dist = 2 if machine['machine_name'] == 'long-handed-inserter' else 1
+            is_long = machine['machine_name'] == 'long-handed-inserter'
+            pickup_dist = 2 if is_long else 1
+            drop_dist = 2 if is_long else 1
 
             # Pickup (Front)
             front_x, front_y = get_search_coords(x, y, rotation, distance=pickup_dist)
@@ -55,12 +72,14 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
 
             front_entity, behind_entity = None, None
 
-            for other in all_machines:
+            # Iterate only over valid targets, not the whole map
+            for other in interactable_targets:
                 if other == machine: continue
-                # Basic filter for valid interaction targets
-                if not (other['machine_name'].startswith('assembling') or 'belt' in other['machine_name'] or
-                        'chest' in other['machine_name'] or 'lab' in other['machine_name'] or
-                        'furnace' in other['machine_name'] or 'chemical' in other['machine_name']):
+
+                # Optimization: Bounding box pre-check (AABB)
+                # If the target is too far away in X or Y, don't run the detailed selection box math.
+                # Max reach + machine size ~ 3 tiles.
+                if abs(other['x'] - x) > 3 or abs(other['y'] - y) > 3:
                     continue
 
                 if is_point_in_selection_box(front_x, front_y, other['selection_box']):
@@ -78,7 +97,9 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
                               "to_y": behind_entity['y']})
         return edges
 
-    # --- PIPE TO GROUND LOGIC ---
+    # ==========================================
+    # 2. PIPE TO GROUND LOGIC (Coordinate Lookup - Already Optimal)
+    # ==========================================
     if is_pipe_to_ground:
         coord_lookup = {(m['x'], m['y']): m for m in machine_list}
         for machine in machine_list:
@@ -86,19 +107,20 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
             x, y, rotation = machine['x'], machine['y'], machine['rotation']
 
             opposite_rotation = (rotation + 8) % 16
-            # Search in direction of open end
             for distance in range(1, max_distance + 1):
                 sx, sy = get_search_coords(x, y, opposite_rotation, distance)
                 other = coord_lookup.get((sx, sy))
                 if other and other['machine_name'] in check_to:
-                    if other['rotation'] == rotation: break  # Blocked by same facing pipe
+                    if other['rotation'] == rotation: break
                     if other['rotation'] == opposite_rotation:
                         edges.append({"from_name": machine['machine_name'], "from_x": x, "from_y": y,
                                       "to_name": other['machine_name'], "to_x": sx, "to_y": sy})
                         break
         return edges
 
-    # --- UNDERGROUND BELT LOGIC ---
+    # ==========================================
+    # 3. UNDERGROUND BELT LOGIC (Coordinate Lookup - Already Optimal)
+    # ==========================================
     if is_underground_belt:
         coord_lookup = {(m['x'], m['y']): m for m in machine_list}
         for machine in machine_list:
@@ -115,8 +137,38 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
                         break
         return edges
 
-    # --- STANDARD LOGIC (Belts, Drills, etc) ---
+    # ==========================================
+    # 4. BURNER MINER LOGIC (Optimized)
+    # ==========================================
+    if is_burner_miner:
+        # PRE-FILTER: Only look at valid output targets (Furnaces, Belts)
+        valid_targets = [m for m in machine_list if m['machine_name'] in check_to]
+
+        for machine in machine_list:
+            if machine['machine_name'] not in check_from: continue
+            x, y, rotation = machine['x'], machine['y'], machine['rotation']
+
+            # Use Distance 2 to ensure we land IN the tile, not on the edge
+            sx, sy = get_search_coords(x, y, rotation, distance=2)
+
+            for other in valid_targets:
+                if other == machine: continue
+
+                # Simple distance check optimization before complex box math
+                if abs(other['x'] - sx) > 1.5 or abs(other['y'] - sy) > 1.5:
+                    continue
+
+                if is_point_in_selection_box(sx, sy, other['selection_box']):
+                    edges.append({"from_name": machine['machine_name'], "from_x": x, "from_y": y,
+                                  "to_name": other['machine_name'], "to_x": other['x'], "to_y": other['y']})
+                    break
+        return edges
+
+    # ==========================================
+    # 5. STANDARD LOGIC (Coordinate Lookup - Already Optimal)
+    # ==========================================
     coord_lookup = {(m['x'], m['y']): m for m in machine_list}
+
     for machine in machine_list:
         if machine['machine_name'] not in check_from: continue
         x, y, rotation = machine['x'], machine['y'], machine['rotation']
@@ -363,14 +415,14 @@ def translateEntitesToEdges(reciever) -> list[Any] | None:
     # 1. Fetch Data
     machines = reciever.scan_entities_boundingboxes()
     if not machines:
-        print("No entities found.")
-        return
+        #print("No entities found.")
+        return []
 
     # 2. Consolidate Edge Finding
     all_edges = []
 
     # --- Transport & Belts ---
-    print("\nProcessing Belts...")
+    #print("\nProcessing Belts...")
     all_edges.extend(
         find_edges(machines, check_from=('transport-belt', 'fast-transport-belt', 'express-transport-belt'),
                    check_to=('transport-belt', 'fast-transport-belt', 'express-transport-belt')))
@@ -384,11 +436,13 @@ def translateEntitesToEdges(reciever) -> list[Any] | None:
 
     all_edges.extend(find_edges(machines, check_from=('underground-belt',),
                                 check_to=('underground-belt',), max_distance=5, is_underground_belt=True))
+    all_edges.extend(find_edges(machines, check_from=('burner-mining-drill',),
+                                check_to=('stone-furnace', 'transport-belt','fast-transport-belt', 'express-transport-belt'),max_distance=1,is_burner_miner=True))
 
     all_edges.extend(find_belt_to_splitter_edges(machines))
 
     # --- Inserters ---
-    print("\nProcessing Inserters...")
+    #print("\nProcessing Inserters...")
     all_edges.extend(find_edges(machines,
                                 check_from=('inserter', 'fast-inserter', 'long-handed-inserter', 'stack-inserter',
                                             'burner-inserter', 'bulk-inserter'),
@@ -396,7 +450,7 @@ def translateEntitesToEdges(reciever) -> list[Any] | None:
                                 is_inserter=True))
 
     # --- Fluids (Pipes & Machines) ---
-    print("\nProcessing Fluids...")
+    #print("\nProcessing Fluids...")
     all_edges.extend(find_edges(machines, check_from=('pipe-to-ground',),
                                 check_to=('pipe-to-ground',), max_distance=9, is_pipe_to_ground=True))
 
@@ -410,15 +464,15 @@ def translateEntitesToEdges(reciever) -> list[Any] | None:
     all_edges.extend(find_pumpjack_pipe_edges(machines))
 
     # --- Power ---
-    print("\nProcessing Power...")
+    #print("\nProcessing Power...")
     all_edges.extend(find_power_edges(machines))
 
     # 3. Final Output
-    print(f"\n=== FINAL CONSOLIDATION ===")
-    print(f"Total edges generated: {len(all_edges)}")
+    #print(f"\n=== FINAL CONSOLIDATION ===")
+    #print(f"Total edges generated: {len(all_edges)}")
 
-    # Optional: Print edges or process further
+    # Optional: #print edges or process further
     # for e in all_edges:
-    #     print(e)
+    #     #print(e)
 
     return all_edges

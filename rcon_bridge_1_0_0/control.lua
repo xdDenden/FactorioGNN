@@ -252,6 +252,10 @@ commands.add_command("scan_entities", "Returns JSON list of assemblers", functio
     end
 end)
 
+
+
+
+
 -- Neuer RCON Command für Assembler
 commands.add_command("scan_entities_boundingboxes", "Returns JSON list of assemblers", function(event)
     local json_str = scan_entities_boundingboxes()

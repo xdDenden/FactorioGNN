@@ -1,35 +1,55 @@
+from sympy import false
+
 import rcon_bridge_1_0_0.rcon_bridge as rcon_bridge
+from mappings import ID_TO_ACTION, ID_TO_ITEM
 
-def translateGNNtoFactorio( x,  y, action,  item, rotation,  receiver) -> None:
+def generate_jimbo_thought(action_idx, item_idx, rotation_idx):
     """
-    Translates GNN model outputs into Factorio commands via RCON.
-    :param x: World X coordinate to target
-    :param y: World Y coordinate to target
-    :param action: Action logits from the model
-    :param item: Item logits from the model
-    :param rotation: Rotation logits from the model
-    :param receiver: An instance of RconBridge to send commands through
+    Pure string generation. Fast CPU operation.
+    Does not touch RCON or the GPU.
     """
-    match action:
+    act_name = ID_TO_ACTION.get(action_idx, f"UNKNOWN_ACTION_{action_idx}")
+    # Use ITEM map for items, fallback to ID if missing
+    item_name = ID_TO_ITEM.get(item_idx, f"ITEM_{item_idx}")
 
-        case 0:
-            receiver.move_to(x, y)
-            print(f"Moving to position x={x}, y={y}")
-        case 1:
-            receiver.mine(x, y)
-            print(f"Mining at position x={x}, y={y}")
-        case 2:
-            receiver.craft(item, 1)
-            print(f"Crafting item index {item}, amount 1")
-        case 3:
-            receiver.build(x,y,item,rotation)
-            print(f"Building item index {item} at position x={x}, y={y}")
-        case 4:
-            receiver.insert(x,y,item,1)
-            print(f"Inserting item index {item}, amount 1 at position x={x}")
-        case 5:
-            receiver.take(x,y)
-            print(f"Taking items at position x={x}, y={y}")
-        case 6:
-            receiver.change_recipe(x,y,item)
-            print(f"Changing recipe to item index {item} at position x={x}, y={y}")
+    return f"Jimbo wants to {act_name} with {item_name} at rotation {rotation_idx}!"
+
+
+def translateGNNtoFactorio(x, y, action, item, rotation, receiver, verbose) -> str:
+    """
+    Executes the command and returns the Jimbo log string.
+    """
+    # 1. Generate the Personality String
+    jimbo_msg = generate_jimbo_thought(action, item, rotation)
+
+    # 2. Append specific coordinates for the final log
+    full_log = f"{jimbo_msg} (Target: {x:.1f}, {y:.1f})"
+
+    # 3. Execute RCON Command
+    try:
+        match action:
+            case 0:  # move_to
+                receiver.move_to(x, y)
+            case 1:  # mine
+                receiver.mine(x, y)
+            case 2:  # craft
+                receiver.craft(item, 1)
+            case 3:  # build
+                receiver.build(x, y, item, rotation)
+            case 4:  # insert
+                receiver.insert(x, y, item, 1)
+            case 5:  # take
+                receiver.take(x, y)
+            case 6:  # change_recipe
+                receiver.change_recipe(x, y, item)
+            case _:
+                pass  # No-op for 'none' or unknown
+
+    except Exception as e:
+        full_log += f" [FAILED: {e}]"
+
+    # 4. Optional Printing (Controlled by Main Loop)
+    if verbose:
+        print(full_log)
+
+    return full_log

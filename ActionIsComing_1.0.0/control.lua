@@ -38,6 +38,7 @@ local buildings = {
 
 -- Item-Liste
 local item_list = {
+    [0] = "none",
     [1] = "wooden-chest",
     [2] = "storage-tank",
     [3] = "transport-belt",
@@ -69,46 +70,50 @@ local item_list = {
     [29] = "oil-refinery",
     [30] = "chemical-plant",
     [31] = "lab",
-    [32] = "wood",
-    [33] = "iron-ore",
-    [34] = "copper-ore",
-    [35] = "coal",
-    [36] = "stone",
-    [37] = "stone-brick",
-    [38] = "iron-plate",
-    [39] = "copper-plate",
-    [40] = "steel-plate",
-    [41] = "basic-oil-processing",
-    [42] = "plastic-bar",
-    [43] = "sulfur",
-    [44] = "iron-gear-wheel",
-    [45] = "iron-stick",
-    [46] = "copper-cable",
-    [47] = "electronic-circuit",
-    [48] = "advanced-circuit",
-    [49] = "engine-unit",
-    [50] = "automation-science-pack",
-    [51] = "logistic-science-pack",
-    [52] = "chemical-science-pack",
+    [32] = "iron-plate",
+    [33] = "copper-plate",
+    [34] = "steel-plate",
+    [35] = "plastic-bar",
+    [36] = "sulfur",
+    [37] = "iron-gear-wheel",
+    [38] = "iron-stick",
+    [39] = "copper-cable",
+    [40] = "electronic-circuit",
+    [41] = "advanced-circuit",
+    [42] = "engine-unit",
+    [43] = "automation-science-pack",
+    [44] = "logistic-science-pack",
+    [45] = "chemical-science-pack",
+    [46] = "wood",
+    [47] = "coal",
+    [48] = "stone",
+    [49] = "iron-ore",
+    [50] = "copper-ore",
+    [51] = "stone-brick",
+    [52] = "basic-oil-processing"
 }
 
 
 local recipe_exclude = {
-    [32] = true,  -- wood
-    [33] = true,  -- iron-ore
-    [34] = true,  -- copper-ore
-    [35] = true,  -- coal
-    [36] = true,  -- stone
+    [46] = true,  -- wood
+    [49] = true,  -- iron-ore
+    [50] = true,  -- copper-ore
+    [47] = true,  -- coal
+    [48] = true,  -- stone
     -- Füge hier weitere IDs hinzu die keine Rezepte sind
 }
 
 -- DANN die Exclude-Liste
 local craft_exclude = {
-    [32] = true,  -- wood
-    [33] = true,  -- iron-ore
-    [34] = true,  -- copper-ore
-    [35] = true,  -- coal
-    [36] = true,  -- stone
+    [46] = true,  -- wood
+    [49] = true,  -- iron-ore
+    [50] = true,  -- copper-ore
+    [47] = true,  -- coal
+    [48] = true,  -- stone
+}
+
+local insert_exclude = {
+    [52] = true,  -- basic-oil-processing
 }
 
 script.on_init(function()
@@ -133,57 +138,75 @@ end
 
 --Build something and remove it out of the characters inventory command
 --/build x y <index(1-31)> <direction(0-3)>
+--Build something and remove it out of the characters inventory command
+--/build x y <index(1-31)> <direction(0-3)>
 commands.add_command("build", "", function(event)
-  --local player = game.players[event.player_index]
+  local surface = game.surfaces[1]
+
   local params = {}
-  
   for param in string.gmatch(event.parameter or "", "%S+") do
     table.insert(params, param)
   end
-  
+
   local x = tonumber(params[1])
   local y = tonumber(params[2])
   local index = tonumber(params[3])
   local dir_input = tonumber(params[4]) or 0
 
-  local direction = dir_input * 2
-  
+  -- Maps input 0-3 to specific Factorio direction integers
+  local direction_map = {
+    [0] = 0,   -- Input 0 -> 0
+    [1] = 4,   -- Input 1 -> 4
+    [2] = 8,   -- Input 2 -> 8
+    [3] = 12   -- Input 3 -> 12
+  }
+
+  -- Select direction from map, default to 0 if input is weird
+  local direction = direction_map[dir_input] or 0
+
   local building = buildings[index]
-  
+
   if not building then
     game.print("Invalid index!")
     return
   end
-  
-  local characters = player.surface.find_entities_filtered{
+
+  local characters = surface.find_entities_filtered{
     name = "character",
     force = "AI"
   }
-  
+
   local character = characters[1]
-  local item_count = character.get_item_count(building)
-  
-  if item_count < 1 then
-    game.print("char has no " .. building .. "in the inventory")
+
+  -- Safety check if character exists
+  if not character then
+    game.print("No AI character found")
     return
   end
-  
+
+  local item_count = character.get_item_count(building)
+
+  if item_count < 1 then
+    game.print("char has no " .. building .. " in the inventory")
+    return
+  end
+
   local pos = {x, y}
-  
-  if player.surface.can_place_entity{name = building, position = pos, force = player.force, direction = direction} then
-  
+
+  if surface.can_place_entity{name = building, position = pos, force = "AI", direction = direction} then
+
     --remove item out of the inventory of the character
     character.remove_item{name = building, count = 1}
-    
+
     --method to create the entity
-    player.surface.create_entity{
+    surface.create_entity{
       name = building,
       position = pos,
-      force = player.force,
+      force = "AI",
       direction = direction
     }
-    
-    game.print("Built " .. building .. " (Remaining: " .. (item_count - 1) .. ") Direction " .. dir_input)
+
+    game.print("Built " .. building .. " (Remaining: " .. (item_count - 1) .. ") Direction val: " .. direction)
   else
     game.print("you can't place there")
   end
@@ -199,11 +222,20 @@ commands.add_command("rotate", "Rotate building at position: /rotate <x> <y> <di
     local y = tonumber(params[2])
     local dir_input = tonumber(params[3]) or 0
 
-    local direction = dir_input * 2
+    -- 1. NEW: Direction Map Logic
+    local direction_map = {
+        [0] = 0,   -- Input 0 -> 0 (North)
+        [1] = 4,   -- Input 1 -> 4 (South for 8-way, or East for 16-way)
+        [2] = 8,   -- Input 2 -> 8
+        [3] = 12   -- Input 3 -> 12
+    }
+
+    -- Default to 0 if input is invalid
+    local direction = direction_map[dir_input] or 0
 
     local surface = game.surfaces[1]
 
-    --find entity at position
+    -- Find entity at position
     local entities = surface.find_entities_filtered{
         position = {x, y},
         radius = 0.5
@@ -214,15 +246,19 @@ commands.add_command("rotate", "Rotate building at position: /rotate <x> <y> <di
         return
     end
 
+    -- Usually, the first entity found is the building, but sometimes it might be a ghost or item-on-ground
+    -- It is often safer to grab the first one that supports direction
     local entity = entities[1]
 
     if not entity.supports_direction then
         game.print(entity.name .. " is not rotatable!")
         return
     end
-    --set direction
+
+    -- 2. FIX: Actually apply the direction to the entity
     entity.direction = direction
-    game.print("Rotated " .. entity.name .. " at (" .. x .. ", " .. y .. ") to direction " .. dir_input)
+
+    game.print("Rotated " .. entity.name .. " at (" .. x .. ", " .. y .. ") to direction val: " .. direction)
 end)
 
 --Spawn a new Character(AI)
@@ -444,9 +480,9 @@ commands.add_command("char_info", "", function(event)
   -- Helper function to print to the correct target (Player or Server Console)
   local function output(msg)
     if player then
-      player.print(msg)
+      --player.print(msg)
     else
-      game.print(msg) -- Prints to everyone/console if run by server
+      --game.print(msg) -- Prints to everyone/console if run by server
     end
   end
 
@@ -536,7 +572,12 @@ commands.add_command("insert_into", "AI Character inserts items into machine: /i
     }
     
     local character = ai_characters[1]
-    
+
+    if insert_exclude[recipe_id] then
+        game.print("Item ID " .. recipe_id .. " cannot be inserted!")
+        return
+    end
+
     -- Prüfe ob Character das Item hat
     local item_count = character.get_item_count(item_name)
     if item_count < count then

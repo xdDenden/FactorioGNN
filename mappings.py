@@ -21,6 +21,7 @@ STATUS_MAP: Dict[int, int] = {
 }
 
 MACHINE_NAME_MAP: Dict[str, int] = {
+    "none": 0,
     "wooden-chest": 1,
     "storage-tank": 2,
     "transport-belt": 3,
@@ -55,6 +56,7 @@ MACHINE_NAME_MAP: Dict[str, int] = {
 }
 
 MINING_TARGET_MAP: Dict[str, int] = {
+
     "stone": 1,
     "iron-ore": 2,
     "copper-ore": 3,
@@ -63,6 +65,7 @@ MINING_TARGET_MAP: Dict[str, int] = {
 }
 
 RECIPE_MAP: Dict[str, int] = {
+    "none": 0,
     "wooden-chest": 1,
     "storage-tank": 2,
     "transport-belt": 3,
@@ -111,6 +114,7 @@ RECIPE_MAP: Dict[str, int] = {
     "chemical-science-pack": 52
 }
 ITEM_MAP: Dict[str, int] = {
+    "none": 0,
     "wooden-chest": 1,
     "storage-tank": 2,
     "transport-belt": 3,
@@ -165,11 +169,19 @@ ITEM_MAP: Dict[str, int] = {
 
 }
 ACTION_MAP = {
-    "moveto": 1,      # Index 0
-    "mine": 2,         # Index 1
-    "craft": 3,        # Index 2
-    "build": 4,      # Index 3
-    "insert_into": 5,  # Index 4
-    "take": 6,          # Index 5
-    "change_recipe":7  # Index 6
+    "none": 0,
+    "moveto": 1,
+    "mine": 2,
+    "craft": 3,
+    "build": 4,
+    "insert_into": 5,
+    "take": 6,
+    "change_recipe":7
 }
+
+# --- REVERSE MAPPINGS (For Jimbo/Logging) ---
+# These allow O(1) lookup from ID -> Name without searching
+ID_TO_ACTION = {v: k for k, v in ACTION_MAP.items()}
+ID_TO_ITEM = {v: k for k, v in ITEM_MAP.items()}
+ID_TO_RECIPE = {v: k for k, v in RECIPE_MAP.items()}
+ID_TO_RECIPE = {v: k for k, v in RECIPE_MAP.items()}
