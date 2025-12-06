@@ -25,7 +25,8 @@ local function scan_entities()
 			"pipe",
 			"pipe-to-ground",
 			"electric-pole",
-            "splitter"
+            "splitter",
+            "pump"
 		}
 	}
     
@@ -192,6 +193,16 @@ local function scan_entities()
 			--entity_data.products_finished = entity.products_finished or "None" --products finished
 			--entity_data.mining_target = entity.mining_target and entity.mining_target.name or "none"			
 		end
+
+        if entity.type == "pump" then
+			entity_data.status = entity.status or 0 --active state
+			entity_data.rotation = entity.direction or "None" --rotation
+			entity_data.energy = (entity.energy == 0) and "False" or "True" --energy
+			--entity_data.recipe_name = entity.get_recipe() and entity.get_recipe().name or "No Recipe" --recipe
+			--entity_data.is_crafting = entity.is_crafting() or "False" --is crafting?
+			--entity_data.products_finished = entity.products_finished or "None" --products finished
+			--entity_data.mining_target = entity.mining_target and entity.mining_target.name or "none"
+		end
         
         table.insert(entities_list, entity_data)
     end
@@ -224,7 +235,8 @@ local function scan_entities_boundingboxes()
 			"pipe",
 			"pipe-to-ground",
 			"electric-pole",
-            "splitter"
+            "splitter",
+            "pump"
 		}
 	}
 	

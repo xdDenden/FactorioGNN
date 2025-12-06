@@ -107,7 +107,21 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
             x, y, rotation = machine['x'], machine['y'], machine['rotation']
 
             opposite_rotation = (rotation + 8) % 16
-            for distance in range(1, max_distance + 1):
+
+            # Check for pipe-to-ground 1 tile away in the direction we're facing
+            # with opposite rotation (entrance-to-entrance connection)
+            # Only add edge if we're the "lower" coordinate to avoid duplicates
+            check_x, check_y = get_search_coords(x, y, rotation, distance=1)
+            adjacent = coord_lookup.get((check_x, check_y))
+            if adjacent and adjacent['machine_name'] in check_to:
+                if adjacent['rotation'] == opposite_rotation:
+                    # Only create edge from the pipe with smaller coordinates
+                    if (x, y) < (check_x, check_y):
+                        edges.append({"from_name": machine['machine_name'], "from_x": x, "from_y": y,
+                                      "to_name": adjacent['machine_name'], "to_x": check_x, "to_y": check_y})
+
+            # Original logic: Check for underground connection (2-10 tiles away)
+            for distance in range(2, max_distance + 1):
                 sx, sy = get_search_coords(x, y, opposite_rotation, distance)
                 other = coord_lookup.get((sx, sy))
                 if other and other['machine_name'] in check_to:
@@ -452,7 +466,7 @@ def translateEntitesToEdges(reciever) -> list[Any] | None:
     # --- Fluids (Pipes & Machines) ---
     #print("\nProcessing Fluids...")
     all_edges.extend(find_edges(machines, check_from=('pipe-to-ground',),
-                                check_to=('pipe-to-ground',), max_distance=9, is_pipe_to_ground=True))
+                                check_to=('pipe-to-ground',), max_distance=10, is_pipe_to_ground=True))
 
     all_edges.extend(find_pipe_edges(machines))
     all_edges.extend(find_ground_pipe_pipe_edges(machines))
