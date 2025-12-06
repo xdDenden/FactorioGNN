@@ -1,7 +1,7 @@
 import json
 import math
 from typing import List, Dict, Any, Optional
-from mcrcon import MCRcon
+import factorio_rcon
 from typing import TypedDict, Any, List
 
 HOST = "localhost"
@@ -43,27 +43,37 @@ class Rcon_reciever:
         self.host = host
         self.password = password
         self.port = port
-        self._rcon: Optional[MCRcon] = None
+        self._rcon: Optional[factorio_rcon.RCONClient] = None
 
     def connect(self) -> None:
         if self._rcon is None:
-            self._rcon = MCRcon(self.host, self.password, port=self.port)
+            # The 'rcon' library Client is designed to work as a context manager.
+            # To maintain the persistent connection model of this class,
+            # we manually trigger the context entry.
+            self._rcon = factorio_rcon.RCONClient(self.host, self.port, self.password)
             self._rcon.connect()
 
     def disconnect(self) -> None:
         if self._rcon:
             try:
-                self._rcon.disconnect()
+                self._rcon.close()
             finally:
                 self._rcon = None
 
     def scan_entities(self) -> List[Dict[str, Any]]:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
-        response = self._rcon.command("/scan_entities")
+
+        # 'mcrcon' uses .command(), 'rcon' uses .run()
+        response = self._rcon.send_command("/scan_entities")
         if not response or not response.strip():
             return []
-        entities = json.loads(response)
+        try:
+            entities = json.loads(response)
+        except json.JSONDecodeError as e:
+            print(f"JSON Decode Error: {e}")
+            print(f"Partial response received: {response[:100]}...")
+            return []
         return entities
 
     def scan_entities_boundingboxes(self) -> List[EntityData]:
@@ -71,25 +81,28 @@ class Rcon_reciever:
             raise RuntimeError("Not connected. Call connect() first.")
 
         # Note: Ensure the Lua command string matches the function name in Lua
-        response = self._rcon.command("/scan_entities_boundingboxes")
+        response = self._rcon.send_command("/scan_entities_boundingboxes")
 
         if not response or not response.strip():
             return []
 
-        entities_with_bounding_boxes: List[EntityData] = json.loads(response)
-        return entities_with_bounding_boxes
+        try:
+            entities_with_bounding_boxes: List[EntityData] = json.loads(response)
+            return entities_with_bounding_boxes
+        except json.JSONDecodeError:
+            return []
 
     def move_to(self, x: int, y: int) -> None:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
-        command = self._rcon.command(f"/moveto {x} {y}")
+        self._rcon.send_command(f"/moveto {x} {y}")
         return None
 
     def char_info(self) -> CharInfo:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
 
-        response = self._rcon.command("/char_info")
+        response = self._rcon.send_command("/char_info")
         if not response or not response.strip():
             return {"pos": {"x": 0, "y": 0}, "inventory": []}
 
@@ -98,42 +111,42 @@ class Rcon_reciever:
     def give(self, itemIndex: int, amount: int) -> None:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
-        self._rcon.command(f"/give {itemIndex} {amount}")
+        self._rcon.send_command(f"/give {itemIndex} {amount}")
 
     def craft(self, itemIndex: int, amount: int) -> None:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
-        self._rcon.command(f"/craft {itemIndex} {amount}")
+        self._rcon.send_command(f"/craft {itemIndex} {amount}")
 
     def mine(self, x: float, y: float) -> None:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
         if self.distanceCheck(x, y):
-            self._rcon.command(f"/mine {x} {y} ")
+            self._rcon.send_command(f"/mine {x} {y} ")
 
     def insert(self,x: float, y: float, itemIndex: int, amount: int) -> None:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
         if self.distanceCheck(x, y):
-            self._rcon.command(f"/insert_into {x} {y} {itemIndex} {amount}")
+            self._rcon.send_command(f"/insert_into {x} {y} {itemIndex} {amount}")
 
     def take(self,x: float, y: float) -> None:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
         if self.distanceCheck(x, y):
-            self._rcon.command(f"/take {x} {y} ")
+            self._rcon.send_command(f"/take {x} {y} ")
 
     def change_recipe(self,x: float, y: float, itemIndex: int) -> None:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
         if self.distanceCheck(x, y):
-            self._rcon.command(f"/c_recipe {x} {y} {itemIndex} ")
+            self._rcon.send_command(f"/c_recipe {x} {y} {itemIndex} ")
 
     def build(self, x: float, y: float, buildingIndex: int, rotation: int) -> None:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
         if self.distanceCheck(x, y):
-            self._rcon.command(f"/build {x} {y} {buildingIndex} {rotation} ")
+            self._rcon.send_command(f"/build {x} {y} {buildingIndex} {rotation} ")
 
     def distanceCheck(self, x2: float, y2: float) -> bool:
         if not self._rcon:
@@ -151,7 +164,7 @@ class Rcon_reciever:
     def rotate(self, x: float, y: float, direction: int) -> None:
         if not self._rcon:
             raise RuntimeError("Not connected. Call connect() first.")
-        self._rcon.command(f"/rotate {x} {y} {direction} ")
+        self._rcon.send_command(f"/rotate {x} {y} {direction} ")
 
 
 if __name__ == "__main__":
