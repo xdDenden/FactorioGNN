@@ -34,14 +34,26 @@ def get_base64_image(machine_name):
         return resources_map[machine_name]
 
     # Name cleaning
-    if "turbo" in machine_name:
+    # 1. Handle exact exceptions first using '=='
+    if machine_name == "pump":
+        formatted_name = "thumb/Pump.png/48px-Pump"
+
+    elif machine_name == "offshore-pump":
+        formatted_name = "thumb/Offshore_pump.png/48px-Offshore_pump"
+
+    elif machine_name == "long-handed-inserter":
+        formatted_name = "Long-handed_inserter"
+
+    # 2. Handle partial matches/patterns (like Turbo -> Express)
+    elif "turbo" in machine_name:
         fallback_name = machine_name.replace("turbo", "express")
         formatted_name = fallback_name.replace('-', '_').capitalize()
-    if "long-handed-inserter" in machine_name:
-        formatted_name = "Long-handed_inserter"
+
+    # 3. Default fallback for everything else
     else:
         formatted_name = machine_name.replace('-', '_').capitalize()
 
+    # Final URL construction
     remote_url = f"https://wiki.factorio.com/images/{formatted_name}.png"
 
     try:

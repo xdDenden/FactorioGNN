@@ -52,7 +52,8 @@ MACHINE_NAME_MAP: Dict[str, int] = {
     "assembling-machine-2": 28,
     "oil-refinery": 29,
     "chemical-plant": 30,
-    "lab": 31
+    "lab": 31,
+    "pump":32
 }
 
 MINING_TARGET_MAP: Dict[str, int] = {
@@ -166,6 +167,7 @@ ITEM_MAP: Dict[str, int] = {
     "iron-ore": 49,
     "copper-ore": 50,
     "stone-brick": 51,
+    "pump":52
 
 }
 ACTION_MAP = {
