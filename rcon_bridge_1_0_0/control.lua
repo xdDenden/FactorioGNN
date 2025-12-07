@@ -8,7 +8,7 @@ local function scan_entities()
     -- Alle Entities finden (kannst mehrere types hinzufügen)
 	local entities = surface.find_entities_filtered{
 		position = {0, 0},  -- Spawn position (oder player position wenn jemand online)
-		radius = 1000,  -- Scan Radius
+		radius = 125,  -- Scan Radius
 		type = {
 			"assembling-machine",
 			"furnace",
@@ -218,7 +218,7 @@ local function scan_entities_boundingboxes()
     -- Alle Entities finden (kannst mehrere types hinzufügen)
 	local entities = surface.find_entities_filtered{
 		position = {0, 0},  -- Spawn position (oder player position wenn jemand online)
-		radius = 1000,  -- Scan Radius
+		radius = 125,  -- Scan Radius
 		type = {
 			"assembling-machine",
 			"furnace",
