@@ -360,6 +360,86 @@ def _find_machine_fluid_edges(machine_list, target_name, config_map):
     return edges
 
 
+def find_pump_pipe_edges(machine_list):
+    """Find pump connections to pipes (1 tile in direction, 2 tiles opposite).
+
+    Pump coordinates:
+    - Rotation 0 (North) or 8 (South): pump Y is .0, pipes are at .5
+    - Rotation 4 (East) or 12 (West): pump X is .0, pipes are at .5
+
+    Since pipes are always at .5 coordinates:
+    - 1 tile from pump = pump_coord + 1.5 (in direction)
+    - 2 tiles from pump = pump_coord - 1.5 (opposite direction)
+    """
+    edges = []
+    coord_lookup = {(m['x'], m['y']): m for m in machine_list if m['machine_name'] in ('pipe', 'pipe-to-ground')}
+
+    for machine in machine_list:
+        if machine['machine_name'] != 'pump': continue
+        x, y, rotation = machine['x'], machine['y'], machine['rotation']
+
+        # Adjust coordinates based on rotation to account for pump positioning
+        if rotation == 0:  # North
+            # Pump is at Y.0, pipes are at .5
+            # Front: 1 tile north = Y - 1.5
+            # Back: 2 tiles south = Y + 1.5
+            front_x, front_y = x, y - 1.5
+            back_x, back_y = x, y + 1.5
+        elif rotation == 4:  # East
+            # Pump is at X.0, pipes are at .5
+            # Front: 1 tile east = X + 1.5
+            # Back: 2 tiles west = X - 1.5
+            front_x, front_y = x + 1.5, y
+            back_x, back_y = x - 1.5, y
+        elif rotation == 8:  # South
+            # Pump is at Y.0, pipes are at .5
+            # Front: 1 tile south = Y + 1.5
+            # Back: 2 tiles north = Y - 1.5
+            front_x, front_y = x, y + 1.5
+            back_x, back_y = x, y - 1.5
+        elif rotation == 12:  # West
+            # Pump is at X.0, pipes are at .5
+            # Front: 1 tile west = X - 1.5
+            # Back: 2 tiles east = X + 1.5
+            front_x, front_y = x - 1.5, y
+            back_x, back_y = x + 1.5, y
+        else:
+            continue  # Invalid rotation
+
+        # Check front (1 tile in direction of pump)
+        # Pipe-to-ground must have OPPOSITE rotation (facing toward the pump)
+        opposite_rotation = (rotation + 8) % 16
+        front_pipe = coord_lookup.get((front_x, front_y))
+
+        if front_pipe:
+            is_valid = False
+            if front_pipe['machine_name'] == 'pipe':
+                is_valid = True
+            elif front_pipe['machine_name'] == 'pipe-to-ground' and front_pipe['rotation'] == opposite_rotation:
+                is_valid = True
+
+            if is_valid:
+                edges.append({"from_name": front_pipe['machine_name'], "from_x": front_x, "from_y": front_y,
+                              "to_name": machine['machine_name'], "to_x": x, "to_y": y})
+
+        # Check back (2 tiles in opposite direction)
+        # Pipe-to-ground must have SAME rotation (pump outputs into it)
+        back_pipe = coord_lookup.get((back_x, back_y))
+
+        if back_pipe:
+            is_valid = False
+            if back_pipe['machine_name'] == 'pipe':
+                is_valid = True
+            elif back_pipe['machine_name'] == 'pipe-to-ground' and back_pipe['rotation'] == rotation:
+                is_valid = True
+
+            if is_valid:
+                edges.append({"from_name": machine['machine_name'], "from_x": x, "from_y": y,
+                              "to_name": back_pipe['machine_name'], "to_x": back_x, "to_y": back_y})
+
+    return edges
+
+
 def find_chemical_plant_pipe_edges(machine_list):
     config = {
         0: [{'offset': (-1, -2), 'req_rot': 8}, {'offset': (1, -2), 'req_rot': 8},
@@ -466,6 +546,8 @@ def translateEntitesToEdges(reciever) -> list[Any] | None:
 
     all_edges.extend(find_edges(machines, check_from=('underground-belt',),
                                 check_to=('underground-belt',), max_distance=5, is_underground_belt=True))
+    all_edges.extend(find_edges(machines, check_from=('fast-underground-belt',),
+                                check_to=('fast-underground-belt',), max_distance=7, is_underground_belt=True))
     all_edges.extend(find_edges(machines, check_from=('burner-mining-drill',),
                                 check_to=('stone-furnace', 'transport-belt','fast-transport-belt', 'express-transport-belt'),max_distance=1,is_burner_miner=True))
 
@@ -491,6 +573,7 @@ def translateEntitesToEdges(reciever) -> list[Any] | None:
     all_edges.extend(find_steam_engine_pipe_edges(machines))
     all_edges.extend(find_boiler_pipe_edges(machines))
     all_edges.extend(find_offshore_pipe_edges(machines))
+    all_edges.extend(find_pump_pipe_edges(machines))
     all_edges.extend(find_pumpjack_pipe_edges(machines))
 
     # --- Power ---
