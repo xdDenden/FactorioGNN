@@ -59,7 +59,17 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
         for machine in machine_list:
             if machine['machine_name'] not in check_from: continue
 
-            x, y, rotation = machine['x'], machine['y'], machine['rotation']
+
+            raw_rot = machine.get('rotation')
+            if raw_rot is None or raw_rot == "None":
+                rotation = 0  # Default to 0 if missing rotation
+            else:
+                try:
+                    rotation = int(raw_rot)
+                except ValueError:
+                    rotation = 0
+
+            x, y = machine['x'], machine['y']
             is_long = machine['machine_name'] == 'long-handed-inserter'
             pickup_dist = 2 if is_long else 1
             drop_dist = 2 if is_long else 1
@@ -106,6 +116,8 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
             if machine['machine_name'] not in check_from: continue
             x, y, rotation = machine['x'], machine['y'], machine['rotation']
 
+            if rotation is None:
+                rotation = 0  # Default to 0 if missing rotation
             opposite_rotation = (rotation + 8) % 16
 
             # Check for pipe-to-ground 1 tile away in the direction we're facing
@@ -187,6 +199,8 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
         if machine['machine_name'] not in check_from: continue
         x, y, rotation = machine['x'], machine['y'], machine['rotation']
 
+        if rotation is None:
+            rotation = 0  # Default to 0 if missing rotation
         valid_rotations = [rotation] if strict_rotation else [rotation, (rotation + 4) % 16, (rotation - 4) % 16]
 
         for distance in range(1, max_distance + 1):
@@ -239,6 +253,8 @@ def find_belt_to_splitter_edges(machine_list):
 
     for splitter in splitters:
         x, y, rotation = splitter['x'], splitter['y'], splitter['rotation']
+        if rotation is None:
+            rotation = 0
         opposite_rotation = (rotation + 8) % 16
 
         # Coords

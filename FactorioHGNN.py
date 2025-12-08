@@ -136,18 +136,25 @@ def preprocess_features_for_gnn(feature_list: List[Dict[str, Any]],
         current_idx += N_MACHINE_TYPES
 
         # Status
-        status_val = features.get('status', N_STATUS_TYPES - 1)
+        status_val = features.get('status')
+        if status_val is None:
+            status_val = N_STATUS_TYPES - 1
         output_tensor[i, current_idx + status_val] = 1.0
         current_idx += N_STATUS_TYPES
-
         # Mining Target
-        mining_val = features.get('mining_target', N_MINING_TARGETS - 1)
+        mining_val = features.get('mining_target')
+        if mining_val is None:
+            mining_val = N_MINING_TARGETS - 1
         output_tensor[i, current_idx + mining_val] = 1.0
         current_idx += N_MINING_TARGETS
-
         # Recipe
-        recipe_val = features.get('recipe', N_RECIPES - 1)
+        recipe_val = features.get('recipe')
+        if recipe_val is None:
+            recipe_val = N_RECIPES - 1
+
+
         output_tensor[i, current_idx + recipe_val] = 1.0
+
         current_idx += N_RECIPES
 
         # Items (skipped for machines)
@@ -157,7 +164,6 @@ def preprocess_features_for_gnn(feature_list: List[Dict[str, Any]],
         rotation_val = features.get('rotation')
         rot_idx = (rotation_val + 1) if rotation_val is not None else 0
         output_tensor[i, current_idx + rot_idx] = 1.0
-
     # Player Node - Explicitly Inserted
     if player_info:
         p_idx = num_entities

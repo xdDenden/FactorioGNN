@@ -49,26 +49,27 @@ class FactorioEnv:
         # 1. Fetch Data
         raw_entities = self.receiver.scan_entities()
         raw_player = self.receiver.char_info()
-
         self._last_raw_entities = raw_entities
         self._last_raw_player = raw_player
+
 
         # 2. Parse & Features
         entities = [parse_entity(e['machine_name'], e) for e in raw_entities]
         self.current_bounds = compute_bounds(entities, char_info=raw_player)
         player_info = map_items(raw_player, self.current_bounds)
-        features = transform_entities(entities, bounds=self.current_bounds)
 
+        features = transform_entities(entities, bounds=self.current_bounds)
         # 3. Tensors
         # Player info is inserted here into node_features (User requirement met)
+        #HERE
         node_features = preprocess_features_for_gnn(features, player_info=player_info)
         total_nodes = node_features.shape[0]
+
 
         # 4. Hypergraphs
         p_pos = raw_player.get('pos', {'x': 0, 'y': 0})
         player_ent = Entity('player', int(p_pos.get('x', 0)), int(p_pos.get('y', 0)))
         all_entities = entities + [player_ent]
-
         H_grid = create_grid_hypergraph(all_entities, grid_size=10)
 
         # Functional (Edges)

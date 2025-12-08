@@ -7,6 +7,7 @@ from typing import TypedDict, Any, List
 HOST = "localhost"
 PORT = 27015
 PASSWORD = "eenie7Uphohpaim"
+TIMEOUT = 5.0
 
 class Position(TypedDict):
     x: float
@@ -39,10 +40,11 @@ class EntityData(TypedDict):
     bounding_box: BoundingBox
 
 class Rcon_reciever:
-    def __init__(self, host: str = HOST, password: str = PASSWORD , port: int = PORT):
+    def __init__(self, host: str = HOST, password: str = PASSWORD , port: int = PORT,timeout: float = 5.0 ,):
         self.host = host
         self.password = password
         self.port = port
+        self.timeout = timeout
         self._rcon: Optional[factorio_rcon.RCONClient] = None
 
     def connect(self) -> None:
@@ -50,7 +52,7 @@ class Rcon_reciever:
             # The 'rcon' library Client is designed to work as a context manager.
             # To maintain the persistent connection model of this class,
             # we manually trigger the context entry.
-            self._rcon = factorio_rcon.RCONClient(self.host, self.port, self.password)
+            self._rcon = factorio_rcon.RCONClient(self.host, self.port, self.password,  self.timeout, )
             self._rcon.connect()
 
     def disconnect(self) -> None:
@@ -172,6 +174,8 @@ if __name__ == "__main__":
     try:
         receiver.connect()
         entities = receiver.scan_entities()
+        bbentities = receiver.scan_entities_boundingboxes()
         print(entities)
+        print(bbentities)
     finally:
         receiver.disconnect()
