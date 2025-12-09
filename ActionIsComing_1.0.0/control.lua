@@ -821,3 +821,56 @@ commands.add_command("speed", "", function(event)
         game.print("Current game speed: " .. game.speed)
     end
 end)
+
+commands.add_command("camera_button", "", function(event)
+    local player = game.players[event.player_index]
+
+    if player.gui.top.camera_button then
+        player.gui.top.camera_button.destroy()
+    else
+        local button = player.gui.top.add{
+            type = "button",
+            name = "camera_button",
+            caption = "📷 Bot Cam"
+        }
+    end
+end)
+
+script.on_event(defines.events.on_gui_click, function(event)
+    if event.element.name == "camera_button" then
+        local player = game.players[event.player_index]
+        local surface = game.surfaces[1]
+
+        local bot = surface.find_entities_filtered{name="character", force="AI"}[1]
+
+        if bot then
+            if player.gui.left.camera_frame then
+                player.gui.left.camera_frame.destroy()
+            else
+                local frame = player.gui.left.add{
+                    type = "frame",
+                    name = "camera_frame",
+                    caption = "Bot Camera",
+                    direction = "vertical"
+                }
+
+                local camera = frame.add{
+                    type = "camera",
+                    name = "bot_camera",
+                    position = bot.position,
+                    surface_index = 1,
+                    zoom = 0.75
+                }
+
+                camera.style.minimal_width = 300
+                camera.style.minimal_height = 300
+
+                if bot.valid then
+                    camera.entity = bot
+                end
+            end
+        else
+            player.print("Kein AI-Bot gefunden!")
+        end
+    end
+end)
