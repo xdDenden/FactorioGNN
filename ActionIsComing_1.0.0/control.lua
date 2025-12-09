@@ -779,3 +779,45 @@ commands.add_command("take", "Take items from machine: /take <x> <y>", function(
         game.print("No items found in " .. machine.name .. " at (" .. x .. ", " .. y .. ")")
     end
 end)
+
+commands.add_command("reset", "", function(event)
+    local surface = game.surfaces[1]
+    local types = {
+        "assembling-machine",
+        "furnace",
+        "mining-drill",
+        "transport-belt",
+        "underground-belt",
+        "chemical-plant",
+        "inserter",
+        "boiler",
+        "generator",
+        "oil-refinery",
+        "lab",
+        "offshore-pump",
+        "pipe",
+        "pipe-to-ground",
+        "electric-pole",
+        "splitter",
+        "pump"
+    }
+
+    for _, type in pairs(types) do
+        for _, entity in pairs(surface.find_entities_filtered{type=type}) do
+            entity.destroy()
+        end
+    end
+
+    for _, entity in pairs(surface.find_entities_filtered{name="character", force="AI"}) do
+        entity.teleport({x = 0, y = 0})
+    end
+end)
+
+commands.add_command("speed", "", function(event)
+    if event.parameter then
+        game.speed = tonumber(event.parameter)
+        game.print("Game speed set to: " .. game.speed)
+    else
+        game.print("Current game speed: " .. game.speed)
+    end
+end)
