@@ -106,6 +106,7 @@ local recipe_exclude = {
 
 -- DANN die Exclude-Liste
 local craft_exclude = {
+    [0] = true,  -- none
     [46] = true,  -- wood
     [49] = true,  -- iron-ore
     [50] = true,  -- copper-ore

@@ -60,8 +60,7 @@ class FactorioEnv:
 
         features = transform_entities(entities, bounds=self.current_bounds)
         # 3. Tensors
-        # Player info is inserted here into node_features (User requirement met)
-        #HERE
+        # Player info is inserted here into node_features
         node_features = preprocess_features_for_gnn(features, player_info=player_info)
         total_nodes = node_features.shape[0]
 

@@ -5,9 +5,11 @@ import torch.optim as optim
 import numpy as np
 import random
 from collections import deque
+from tqdm import tqdm
 from config import Config
 from environment import FactorioEnv
 from FactorioHGNN import FactorioHGNN
+import timeit
 
 # --- Hyperparameters ---
 GAMMA = 0.99
@@ -67,11 +69,16 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device):
 def train():
     cfg = Config()
     env = FactorioEnv(cfg)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
     print(f"Training on {device}")
 
     # 1. Initialize Networks
-    # We pass the same dims as defined in FactorioHGNN.py
     policy_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
     target_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
     target_net.load_state_dict(policy_net.state_dict())
@@ -83,7 +90,10 @@ def train():
 
     steps_done = 0
 
-    for episode in range(NUM_EPISODES):
+    # === OUTER PROGRESS BAR (Episodes) ===
+    outer_bar = tqdm(range(NUM_EPISODES), desc="Total Progress", unit="ep")
+
+    for episode in outer_bar:
         obs = env.reset()
         if obs is None: continue
 
@@ -92,107 +102,132 @@ def train():
                         torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
 
         total_reward = 0
+        step_times = []  # Keep track for average calc
 
-        for t in range(cfg.MAX_TIMESTEPS):
-            node_feats, H = obs
-            node_feats = node_feats.to(device)
-            H = H.to(device)
+        # === INNER PROGRESS BAR (Steps within Episode) ===
+        # leave=False ensures the bar clears when the episode ends
+        with tqdm(range(cfg.MAX_TIMESTEPS), desc=f"Ep {episode + 1}", leave=False) as inner_bar:
 
-            # 1. Action Selection
-            epsilon = EPSILON_END + (EPSILON_START - EPSILON_END) * \
-                      np.exp(-1. * steps_done / EPSILON_DECAY)
+            for t in inner_bar:
+                step_start_time = timeit.default_timer()
 
-            act, item, rot, map_idx, next_hidden = select_action(
-                policy_net, node_feats, H, hidden_state, epsilon, device
-            )
+                # === CRITICAL FIX: Refresh observation after the first step ===
+                if t > 0:
+                    obs = env.get_observation()
 
-            # Convert Heatmap Index -> Norm Coords
-            y_grid = map_idx // 17
-            x_grid = map_idx % 17
-            x_norm = -1.0 + (x_grid / 16.0) * 2.0
-            y_norm = -1.0 + (y_grid / 16.0) * 2.0
+                node_feats, H = obs
+                node_feats = node_feats.to(device)
+                H = H.to(device)
 
-            # 2. Environment Step
-            next_obs, reward, done, _ = env.step(act, item, rot, x_norm, y_norm)
-            total_reward += reward
+                # 1. Action Selection
+                epsilon = EPSILON_END + (EPSILON_START - EPSILON_END) * \
+                          np.exp(-1. * steps_done / EPSILON_DECAY)
 
-            # 3. Store Transition
-            if next_obs is not None:
-                # Store tensors on CPU to save VRAM
-                action_tuple = (act, item, rot, map_idx)
-                memory.push((node_feats.cpu(), H.cpu()), action_tuple, reward,
-                            (next_obs[0].cpu(), next_obs[1].cpu()), done)
+                act, item, rot, map_idx, next_hidden = select_action(
+                    policy_net, node_feats, H, hidden_state, epsilon, device
+                )
 
-                obs = next_obs
-                hidden_state = next_hidden
+                # Convert Heatmap Index -> Norm Coords
+                y_grid = map_idx // 17
+                x_grid = map_idx % 17
+                x_norm = -1.0 + (x_grid / 16.0) * 2.0
+                y_norm = -1.0 + (y_grid / 16.0) * 2.0
 
-            # 4. Train Step
-            if len(memory) > BATCH_SIZE:
-                transitions = memory.sample(BATCH_SIZE)
-                # Unzip batch
-                batch_state, batch_action, batch_reward, batch_next_state, batch_done = zip(*transitions)
+                # 2. Environment Step
+                next_obs, reward, done, _ = env.step(act, item, rot, x_norm, y_norm)
+                total_reward += reward
 
-                loss_total = 0
+                # 3. Store Transition
+                if next_obs is not None:
+                    # Store tensors on CPU to save VRAM
+                    action_tuple = (act, item, rot, map_idx)
+                    memory.push((node_feats.cpu(), H.cpu()), action_tuple, reward,
+                                (next_obs[0].cpu(), next_obs[1].cpu()), done)
 
-                # Manual Batch Processing (Variable Graph Sizes)
-                # We iterate the batch because H changes size, making standard collate hard.
-                for i in range(BATCH_SIZE):
-                    s_nodes, s_H = batch_state[i]
-                    a_act, a_item, a_rot, a_map = batch_action[i]
-                    r = batch_reward[i]
-                    ns_nodes, ns_H = batch_next_state[i]
-                    d = batch_done[i]
+                    hidden_state = next_hidden
 
-                    s_nodes, s_H = s_nodes.to(device), s_H.to(device)
-                    ns_nodes, ns_H = ns_nodes.to(device), ns_H.to(device)
+                # 4. Train Step
+                loss_val = 0.0  # Just for display
+                if len(memory) > BATCH_SIZE:
+                    transitions = memory.sample(BATCH_SIZE)
+                    # Unzip batch
+                    batch_state, batch_action, batch_reward, batch_next_state, batch_done = zip(*transitions)
 
-                    # Reset hidden state for stateless Q-learning update
-                    dummy_h = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
-                               torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
+                    loss_total = 0
 
-                    # Predicted Q values
-                    q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(s_nodes, s_H, dummy_h)
+                    # Manual Batch Processing (Variable Graph Sizes)
+                    for i in range(BATCH_SIZE):
+                        s_nodes, s_H = batch_state[i]
+                        a_act, a_item, a_rot, a_map = batch_action[i]
+                        r = batch_reward[i]
+                        ns_nodes, ns_H = batch_next_state[i]
+                        d = batch_done[i]
 
-                    # Target Q values
-                    with torch.no_grad():
-                        if d:
-                            target_val = r
-                        else:
-                            nq_act, nq_item, nq_rot, nq_map, _ = target_net(ns_nodes, ns_H, dummy_h)
-                            # Average Max Q across heads (or use simple max)
-                            # Branching DQN usually defines Q_global = Mean(Q_branches)
-                            max_q = (nq_act.max() + nq_item.max() + nq_rot.max() + nq_map.max()) / 4.0
-                            target_val = r + GAMMA * max_q
+                        s_nodes, s_H = s_nodes.to(device), s_H.to(device)
+                        ns_nodes, ns_H = ns_nodes.to(device), ns_H.to(device)
 
-                    target_tensor = torch.tensor([target_val], device=device)
+                        # Reset hidden state for stateless Q-learning update
+                        dummy_h = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
+                                   torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
 
-                    # Loss per head
-                    l1 = criterion(q_act_v[0, a_act].unsqueeze(0), target_tensor)
-                    l2 = criterion(q_item_v[0, a_item].unsqueeze(0), target_tensor)
-                    l3 = criterion(q_rot_v[0, a_rot].unsqueeze(0), target_tensor)
-                    l4 = criterion(q_map_v.view(-1)[a_map].unsqueeze(0), target_tensor)
+                        # Predicted Q values
+                        q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(s_nodes, s_H, dummy_h)
 
-                    loss_total += (l1 + l2 + l3 + l4)
+                        # Target Q values
+                        with torch.no_grad():
+                            if d:
+                                target_val = r
+                            else:
+                                nq_act, nq_item, nq_rot, nq_map, _ = target_net(ns_nodes, ns_H, dummy_h)
+                                # Average Max Q across heads
+                                max_q = (nq_act.max() + nq_item.max() + nq_rot.max() + nq_map.max()) / 4.0
+                                target_val = r + GAMMA * max_q
 
-                optimizer.zero_grad()
-                (loss_total / BATCH_SIZE).backward()
-                optimizer.step()
+                        target_tensor = torch.tensor([target_val], device=device)
 
-            # 5. Target Update
-            steps_done += 1
-            if steps_done % TARGET_UPDATE == 0:
-                target_net.load_state_dict(policy_net.state_dict())
-                print(f"Updated Target Net at step {steps_done}")
+                        # Loss per head
+                        l1 = criterion(q_act_v[0, a_act].unsqueeze(0), target_tensor)
+                        l2 = criterion(q_item_v[0, a_item].unsqueeze(0), target_tensor)
+                        l3 = criterion(q_rot_v[0, a_rot].unsqueeze(0), target_tensor)
+                        l4 = criterion(q_map_v.view(-1)[a_map].unsqueeze(0), target_tensor)
 
-            if done:
-                break
+                        loss_total += (l1 + l2 + l3 + l4)
 
-        print(f"Episode {episode} | Reward: {total_reward:.2f} | Epsilon: {epsilon:.2f}")
+                    optimizer.zero_grad()
+                    (loss_total / BATCH_SIZE).backward()
+                    optimizer.step()
+                    loss_val = (loss_total / BATCH_SIZE).item()
+
+                # 5. Target Update
+                steps_done += 1
+                if steps_done % TARGET_UPDATE == 0:
+                    target_net.load_state_dict(policy_net.state_dict())
+                    # Use tqdm.write so it prints above the progress bars cleanly
+                    tqdm.write(f"--> Updated Target Net at step {steps_done}")
+
+                step_end_time = timeit.default_timer()
+                step_duration = step_end_time - step_start_time
+                step_times.append(step_duration)
+
+                # === UPDATE INNER BAR (Real-time feedback) ===
+                inner_bar.set_postfix(
+                    Rew=f"{total_reward:.1f}",
+                    Eps=f"{epsilon:.2f}",
+                    StepT=f"{step_duration:.3f}s",
+                    Loss=f"{loss_val:.2f}"
+                )
+
+                if done:
+                    break
+
+        # === UPDATE OUTER BAR (End of episode stats) ===
+        avg_ep_time = np.mean(step_times) if step_times else 0
+        outer_bar.set_postfix(LastRew=f"{total_reward:.1f}", AvgTime=f"{avg_ep_time:.3f}s")
+
     torch.save(policy_net.state_dict(), "jimbo_dqn_weights.pth")
-    print("Model saved to jimbo_dqn_weights.pth")
+    print("\nModel saved to jimbo_dqn_weights.pth")
     env.close()
 
 
 if __name__ == "__main__":
     train()
-

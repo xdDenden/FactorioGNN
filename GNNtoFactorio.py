@@ -33,15 +33,19 @@ def translateGNNtoFactorio(x, y, action, item, rotation, receiver, verbose) -> s
             case 1:  # mine
                 receiver.mine(x, y)
             case 2:  # craft
-                receiver.craft(item, 1)
+                if item is not None or not "none":
+                    receiver.craft(item, 1)
             case 3:  # build
-                receiver.build(x, y, item, rotation)
+                if item is not None and rotation is not None:
+                    receiver.build(x, y, item, rotation)
             case 4:  # insert
-                receiver.insert(x, y, item, 1)
+                if item is not None or not "None":
+                    receiver.insert(x, y, item, 1)
             case 5:  # take
                 receiver.take(x, y)
             case 6:  # change_recipe
-                receiver.change_recipe(x, y, item)
+                if item is not None or not "None":
+                    receiver.change_recipe(x, y, item)
             case _:
                 pass  # No-op for 'none' or unknown
 

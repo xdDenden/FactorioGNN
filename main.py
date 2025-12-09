@@ -9,6 +9,8 @@ from FactorioHGNN import FactorioHGNN
 
 
 # /c game.speed = 4
+#test
+
 
 def main():
     # 1. Setup
@@ -16,7 +18,8 @@ def main():
     env = FactorioEnv(cfg)
 
     # 2. Initialize Model
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    use_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if use_mps else "cpu"))
     model = FactorioHGNN(
         hidden_dim=cfg.HIDDEN_DIM,
         lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM
