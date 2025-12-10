@@ -822,7 +822,7 @@ commands.add_command("speed", "", function(event)
     end
 end)
 
-commands.add_command("camera_button", "", function(event)
+commands.add_command("jimbo_button", "", function(event)
     local player = game.players[event.player_index]
 
     if player.gui.top.camera_button then
@@ -830,14 +830,14 @@ commands.add_command("camera_button", "", function(event)
     else
         local button = player.gui.top.add{
             type = "button",
-            name = "camera_button",
-            caption = "📷 Bot Cam"
+            name = "Jimbo_button",
+            caption = "Jimbo Cam"
         }
     end
 end)
 
 script.on_event(defines.events.on_gui_click, function(event)
-    if event.element.name == "camera_button" then
+    if event.element.name == "Jimbo_button" then
         local player = game.players[event.player_index]
         local surface = game.surfaces[1]
 
@@ -850,13 +850,13 @@ script.on_event(defines.events.on_gui_click, function(event)
                 local frame = player.gui.left.add{
                     type = "frame",
                     name = "camera_frame",
-                    caption = "Bot Camera",
+                    caption = "Jimbo Camera",
                     direction = "vertical"
                 }
 
                 local camera = frame.add{
                     type = "camera",
-                    name = "bot_camera",
+                    name = "Jimbo_camera",
                     position = bot.position,
                     surface_index = 1,
                     zoom = 0.75

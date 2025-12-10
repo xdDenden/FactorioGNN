@@ -10,7 +10,7 @@ class Config:
     RCON_PASSWORD: str = "eenie7Uphohpaim"
 
     # RL / Training Settings
-    MAX_TIMESTEPS: int = 1000
+    MAX_TIMESTEPS: int = 10000
     Random_Seed: int = 42
 
     # Model Settings

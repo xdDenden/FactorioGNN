@@ -1,8 +1,11 @@
 # environment.py
 import torch
 import numpy as np
+from mpmath import sqrtm
+
 import rcon_bridge_1_0_0.rcon_bridge as bridge
 import Edging
+import math
 from parsers import parse_entity, Entity
 from features import transform_entities, map_items, compute_bounds, unnormalize_coord
 from FactorioHGNN import preprocess_features_for_gnn, create_functional_hypergraph, create_grid_hypergraph
@@ -26,12 +29,16 @@ class FactorioEnv:
         # Point 2: Track Global Max Production to prevent mining/rebuilding exploit
         self.max_total_production_seen = 0
 
+        # Track successful crafts for diminishing rewards
+        self.successful_crafts = 0
+
         self.steps_without_action = 0
 
     def reset(self):
         self.milestones.clear()
         self.max_edges_seen = 0
         self.max_total_production_seen = 0
+        self.successful_crafts = 0
         self.steps_without_action = 0
 
         try:
@@ -126,6 +133,13 @@ class FactorioEnv:
             self.steps_without_action = 0
             reward += 0.01
 
+            # --- Successful Craft Reward ---
+            if action_idx == 2:  # craft action
+                alpha = 0.1  # decay rate
+                k = 5.0      # base reward
+                reward += k / (1 + alpha * self.successful_crafts)
+                self.successful_crafts += 1
+
         # --- B. Production Score (Point 2: Anti-Hacking) ---
         current_total_production = 0
         for e in self._last_raw_entities:
@@ -144,9 +158,13 @@ class FactorioEnv:
         # This fixes the exploit.
 
         # --- C. Connectivity / Edges ---
+        alpha = 0.1  # decay rate
+        k = 5.0     # base reward
         if self._current_edge_count > self.max_edges_seen:
             diff = self._current_edge_count - self.max_edges_seen
-            reward += (diff * 0.5)
+            for i in range(diff):
+                n = self.max_edges_seen + i
+                reward += k / (1 + alpha * n)  # diminishing reward
             self.max_edges_seen = self._current_edge_count
 
         # --- D. Milestones ---
