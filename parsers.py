@@ -10,6 +10,10 @@ class Entity:
     y: int
 
 @dataclass
+class Resource(Entity):
+    ore_name: Optional[str] = None
+
+@dataclass
 class AssemblingMachine(Entity):
     status: Optional[int] = None
     is_crafting: Optional[bool] = None
@@ -89,6 +93,13 @@ def parse_entity(type_name: str, kv: Dict[str, str]) -> Entity:
     """
     return parsers.get(type_name, default_parser)(type_name, kv)
 
+def parse_resource(data: Dict[str, Any]) -> Resource:
+    return Resource(
+        type="resource",
+        x=int(data["x"]),
+        y=int(data["y"]),
+        ore_name=data.get("name")
+    )
 @register("assembling-machine-1")
 def parse_assembling_machine(t: str, kv: Dict[str, str]) -> Entity:
     return AssemblingMachine(

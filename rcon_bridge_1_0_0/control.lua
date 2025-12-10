@@ -220,7 +220,50 @@ local function scan_entities()
     return json.encode(entities_list)
 end
 
+local function scan_resources()
+    local resources_list = {}
+    local surface = game.surfaces[1]
 
+
+    local resources = surface.find_entities_filtered{
+        position = {0, 0},
+        type = "resource",
+        radius = 200
+    }
+
+    for _, resource in pairs(resources) do
+
+        if resource.name == "iron-ore" or
+           resource.name == "copper-ore" or
+           resource.name == "coal" or
+           resource.name == "crude-oil" or
+           resource.name == "stone" then
+
+
+            local resource_data = {
+                name = resource.name,
+                x = resource.position.x,
+                y = resource.position.y
+            }
+
+            table.insert(resources_list, resource_data)
+        end
+    end
+
+    return json.encode(resources_list)
+end
+
+commands.add_command("scan_ore", "Returns JSON list of resources", function(event)
+    local json_str = scan_resources()
+    if event.player_index == nil then
+        rcon.print(json_str)
+    else
+        game.players[event.player_index].print(json_str)
+    end
+
+    -- In den Game Chat
+    --game.print("Resources scanned! Found resources on the map.")
+end)
 local function scan_entities_boundingboxes()
 	local entities_list = {}
     local surface = game.surfaces[1]

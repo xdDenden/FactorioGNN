@@ -1,105 +1,129 @@
-import math
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
-import networkx as nx
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import os
 
-def plot_graph(G, labels, save_path, title, cmap=plt.cm.tab10):
-    # ...existing code (moved)...
-    def _separate_positions(pos_dict, nodelist, min_dist=10.0, iterations=30):
-        P = np.array([pos_dict[n] for n in nodelist], dtype=np.float64)
-        mins = P.min(axis=0)
-        spans = np.maximum(P.max(axis=0) - mins, 1e-9)
-        P = (P - mins) / spans
-        cell = max(min_dist, 1e-4)
-        neigh_offsets = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
-        for _ in range(iterations):
-            bins = {}
-            idxs = np.floor(P / cell).astype(int)
-            for i, c in enumerate(map(tuple, idxs)):
-                bins.setdefault(c, []).append(i)
-            moved = 0
-            for i, ci in enumerate(map(tuple, idxs)):
-                pi = P[i]
-                for dx, dy in neigh_offsets:
-                    nbr_cell = (ci[0] + dx, ci[1] + dy)
-                    if nbr_cell not in bins:
-                        continue
-                    for j in bins[nbr_cell]:
-                        if j <= i:
-                            continue
-                        pj = P[j]
-                        d = pj - pi
-                        dist = np.hypot(d[0], d[1])
-                        if dist < min_dist:
-                            if dist < 1e-9:
-                                d = np.random.uniform(-1.0, 1.0, size=2)
-                                dist = np.hypot(d[0], d[1]) + 1e-9
-                            push = (min_dist - dist) * 0.5
-                            step = (d / dist) * push
-                            P[i] -= step
-                            P[j] += step
-                            moved += 1
-            if moved == 0:
-                break
-            P = np.clip(P, 0.0, 1.0)
-        P = P * spans + mins
-        return {n: (float(P[k, 0]), float(P[k, 1])) for k, n in enumerate(nodelist)}
+LOG_FILE = "training_log.csv"
 
-    n = G.number_of_nodes()
-    plt.figure(figsize=(10, 10))
-    pos = nx.spring_layout(G, seed=42, k=1.0 / math.sqrt(max(n, 1)), iterations=100)
-    nodelist = list(range(n))
-    unique_labels = sorted(set(labels.tolist()))
-    color_map = {lbl: cmap(i % cmap.N) for i, lbl in enumerate(unique_labels)}
-    node_colors = [color_map[int(labels[nid].item())] for nid in nodelist]
-    pos = _separate_positions(pos, nodelist=nodelist, min_dist=0.02, iterations=35)
-    nx.draw(G, pos, nodelist=nodelist, node_size=5, width=0.2,
-            with_labels=False, node_color=node_colors, edge_color="k")
-    plt.title(title)
-    plt.axis("off")
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=500)
-    plt.close()
-    print(f"Saved graph plot to {save_path}")
 
-def confusion_matrix(y_true, y_pred, num_classes):
-    # ...existing code...
-    cm = torch.zeros(num_classes, num_classes, dtype=torch.int64)
-    for t, p in zip(y_true.tolist(), y_pred.tolist()):
-        cm[t, p] += 1
-    return cm
+class TrainingLogger:
+    def __init__(self, filename=LOG_FILE):
+        self.filename = filename
+        self.buffer = []
 
-def compute_macro_f1(y_true, y_pred, num_classes):
-    # ...existing code...
-    f1s = []
-    for c in range(num_classes):
-        tp = ((y_pred == c) & (y_true == c)).sum().item()
-        fp = ((y_pred == c) & (y_true != c)).sum().item()
-        fn = ((y_pred != c) & (y_true == c)).sum().item()
-        prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) > 0 else 0.0
-        f1s.append(f1)
-    return sum(f1s) / len(f1s) if f1s else 0.0
+        # Initialize file with headers if it doesn't exist
+        if not os.path.exists(self.filename):
+            df = pd.DataFrame(columns=[
+                "episode", "step_count", "reward", "avg_loss",
+                "epsilon", "max_production", "max_edges",
+                "milestone_count", "milestones_list"
+            ])
+            df.to_csv(self.filename, index=False)
 
-def compute_accuracy(y_true, y_pred):
-    return (y_true == y_pred).float().mean().item()
+    def log_episode(self, episode, step_count, reward, avg_loss, epsilon,
+                    max_production, max_edges, milestones):
+        """
+        Buffers data from a single episode.
+        """
+        # Convert set of milestones to string for CSV storage
+        milestones_str = "|".join(sorted(list(milestones)))
 
-def plot_confusion(cm, acc, save_path):
-    # ...existing code...
-    import matplotlib.pyplot as plt
-    plt.figure(figsize=(6, 5))
-    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-    plt.title(f'HGNN on Cora - Test Acc: {acc:.4f}')
-    plt.colorbar()
-    num_classes = cm.shape[0]
-    ticks = list(range(num_classes))
-    plt.xticks(ticks, ticks)
-    plt.yticks(ticks, ticks)
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=200)
-    plt.close()
-    print(f"Saved confusion matrix to {save_path}")
+        record = {
+            "episode": episode,
+            "step_count": step_count,
+            "reward": reward,
+            "avg_loss": avg_loss,
+            "epsilon": epsilon,
+            "max_production": max_production,
+            "max_edges": max_edges,
+            "milestone_count": len(milestones),
+            "milestones_list": milestones_str
+        }
+        self.buffer.append(record)
+        self.save_buffer()
+
+    def save_buffer(self):
+        """Appends buffered data to the CSV file."""
+        if not self.buffer:
+            return
+
+        df = pd.DataFrame(self.buffer)
+        df.to_csv(self.filename, mode='a', header=False, index=False)
+        self.buffer = []
+        print(f"Logged episode data to {self.filename}")
+
+
+def plot_training_data(filename=LOG_FILE):
+    if not os.path.exists(filename):
+        print(f"No log file found at {filename}")
+        return
+
+    df = pd.read_csv(filename)
+
+    if df.empty:
+        print("Log file is empty.")
+        return
+
+    # Create a 3x2 grid of subplots
+    fig = make_subplots(
+        rows=3, cols=2,
+        subplot_titles=(
+            "Total Reward per Episode", "Average Loss per Episode",
+            "Max Production Score", "Max Functional Edges",
+            "Unique Milestones Reached", "Epsilon Decay"
+        ),
+        vertical_spacing=0.12
+    )
+
+    # 1. Reward
+    fig.add_trace(
+        go.Scatter(x=df['episode'], y=df['reward'], mode='lines+markers', name='Reward', line=dict(color='green')),
+        row=1, col=1
+    )
+
+    # 2. Loss
+    fig.add_trace(
+        go.Scatter(x=df['episode'], y=df['avg_loss'], mode='lines', name='Loss', line=dict(color='red')),
+        row=1, col=2
+    )
+
+    # 3. Production (Anti-Hack Score)
+    fig.add_trace(
+        go.Scatter(x=df['episode'], y=df['max_production'], mode='lines+markers', name='Production',
+                   line=dict(color='blue')),
+        row=2, col=1
+    )
+
+    # 4. Edges
+    fig.add_trace(
+        go.Scatter(x=df['episode'], y=df['max_edges'], mode='lines+markers', name='Edges', line=dict(color='orange')),
+        row=2, col=2
+    )
+
+    # 5. Milestones
+    fig.add_trace(
+        go.Scatter(x=df['episode'], y=df['milestone_count'], mode='lines+markers', name='Milestones',
+                   line=dict(color='purple')),
+        row=3, col=1
+    )
+
+    # 6. Epsilon
+    fig.add_trace(
+        go.Scatter(x=df['episode'], y=df['epsilon'], mode='lines', name='Epsilon',
+                   line=dict(color='gray', dash='dash')),
+        row=3, col=2
+    )
+
+    fig.update_layout(
+        height=900,
+        width=1200,
+        title_text="FactorioHGNN Training Metrics",
+        showlegend=False,
+        template="plotly_dark"
+    )
+
+    fig.show()
+
+
+if __name__ == "__main__":
+    plot_training_data()
