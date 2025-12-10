@@ -1,6 +1,30 @@
 -- control.lua
 local json = require("json")
 
+ai_research_index = 1
+
+local AI_START_TECHS = {
+    ["steam-power"] = true,
+    ["electronics"] = true,
+    ["automation-science-pack"] = true
+}
+
+local AI_RESEARCH_QUEUE = {
+    "automation",
+    "electric-mining-drill",
+    "logistics",
+    "logistic-science-pack",
+    "fast-inserter",
+    "steel-processing",
+    "engine",
+    "automation-2",
+    "fluid-handling",
+    "oil-gathering",
+    "oil-processing",
+    "plastics",
+    "advanced-circuit"
+}
+
 local moving_characters = {}
 
 local buildings = {
@@ -125,17 +149,21 @@ end)
 --create new force
 function gameinit()
     local force_name = "AI"
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
     if not game.forces[force_name] then
         local new_force = game.create_force(force_name)
     end
 
     --Spawn in New Character at the start of the Game
-    local character = game.surfaces[1].create_entity{
+    local character = game.surfaces[2].create_entity{
         name = "character",
         position = {x = 0, y = 0},
         force = "AI"
     }
+
+    global.ai_research_queue = AI_RESEARCH_QUEUE
+    global.ai_research_index = 1
+    global.ai_research_max_queue = 5
 end
 
 --Build something and remove it out of the characters inventory command
@@ -143,7 +171,7 @@ end
 --Build something and remove it out of the characters inventory command
 --/build x y <index(1-31)> <direction(0-3)>
 commands.add_command("build", "", function(event)
-  local surface = game.surfaces[1]
+  local surface = game.surfaces[2]
 
   local params = {}
   for param in string.gmatch(event.parameter or "", "%S+") do
@@ -235,7 +263,7 @@ commands.add_command("rotate", "Rotate building at position: /rotate <x> <y> <di
     -- Default to 0 if input is invalid
     local direction = direction_map[dir_input] or 0
 
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
 
     -- Find entity at position
     local entities = surface.find_entities_filtered{
@@ -266,9 +294,9 @@ end)
 --Spawn a new Character(AI)
 --/spawn
 commands.add_command("spawn", "", function(event)
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
 
-    local character = game.surfaces[1].create_entity{
+    local character = game.surfaces[2].create_entity{
         name = "character",
         position = {x = 0, y = 0},
         force = "AI"
@@ -287,13 +315,13 @@ commands.add_command("mine", "", function(event)
     local y = params[2] or 0
 
     --find the character
-    local character = game.surfaces[1].find_entities_filtered{
+    local character = game.surfaces[2].find_entities_filtered{
         name = "character",
         force = "AI"
     }[1]
 
     --find the entity we want to mine
-    local entity = game.surfaces[1].find_entities_filtered{
+    local entity = game.surfaces[2].find_entities_filtered{
         position = {x, y},
         radius = 1
     }[1]
@@ -315,7 +343,7 @@ commands.add_command("moveto", "", function(event)
     local target_x = math.floor(params[1] or 0)
     local target_y = math.floor(params[2] or 0)
 
-    local character = game.surfaces[1].find_entities_filtered{
+    local character = game.surfaces[2].find_entities_filtered{
         name = "character",
         force = "AI"
     }[1]
@@ -384,7 +412,7 @@ end)
 --gives the character an item from the index (for debug)
 --/give <itemindex(1-52)> <amount>
 commands.add_command("give", "", function(event)
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
     --local player = game.get_player(event.player_index)
 
     local characters = surface.find_entities_filtered{
@@ -417,8 +445,7 @@ end)
 --Let the character craft an item
 --/craft <itemindex(1-52)> <amount>
 commands.add_command("craft", "", function(event)
-    local surface = game.surfaces[1]
-    --local player = game.get_player(event.player_index)
+    local surface = game.surfaces[2]
 
     local characters = surface.find_entities_filtered{
         name = "character",
@@ -457,6 +484,15 @@ commands.add_command("craft", "", function(event)
 
     local recipe_name = item_list[recipe_id]
 
+    -- Check if recipe is researched
+    local ai_force = game.forces["AI"]
+    local recipe = ai_force.recipes[recipe_name]
+
+    if not recipe or not recipe.enabled then
+        game.print("Recipe " .. recipe_name .. " not researched yet!")
+        return
+    end
+
     --crafting method
     local crafted = character.begin_crafting{recipe = recipe_name, count = count}
 
@@ -488,7 +524,7 @@ commands.add_command("char_info", "", function(event)
     end
   end
 
-  local surface = game.surfaces[1]
+  local surface = game.surfaces[2]
 
   -- Find AI Character
   local ai_characters = surface.find_entities_filtered{
@@ -548,7 +584,7 @@ end)
 --/insert x y <itemindex(1-52)> <amount>
 commands.add_command("insert_into", "AI Character inserts items into machine: /insert <item_id> <count> <x> <y>", function(event)
     --local player = game.players[event.player_index]
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
 
     -- Parse Parameter
     local params = {}
@@ -646,7 +682,7 @@ end)
 --/c_recipe x y <itemindex(1-52)>
 commands.add_command("c_recipe", "Set recipe in machine: /c_recipe <x> <y> <recipe_id>", function(event)
     --local player = game.players[event.player_index]
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
 
     -- Parse Parameter
     local params = {}
@@ -707,7 +743,7 @@ end)
 --/take x y
 commands.add_command("take", "Take items from machine: /take <x> <y>", function(event)
     --local player = game.players[event.player_index]
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
 
     -- Parse Parameter
     local params = {}
@@ -780,8 +816,25 @@ commands.add_command("take", "Take items from machine: /take <x> <y>", function(
     end
 end)
 
+commands.add_command("resetsurface", "", function(event)
+    game.delete_surface("Test Surface")
+end)
+
 commands.add_command("reset", "", function(event)
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
+    --game.delete_surface("Penis1")
+    local nauvis_settings = game.surfaces["nauvis"].map_gen_settings
+
+    -- Ändere den Seed in den Settings
+    local new_seed = math.random(1, 4294967295)
+    nauvis_settings.seed = new_seed
+    nauvis_settings.peaceful_mode = true
+    nauvis_settings.no_enemies_mode = true
+    nauvis_settings.cliff_settings = {richness = 0}
+
+    -- Erstelle die neue Surface mit den modifizierten Nauvis-Settings
+    local surface = game.create_surface("Test Surface", nauvis_settings)
+
     local types = {
         "assembling-machine",
         "furnace",
@@ -802,16 +855,86 @@ commands.add_command("reset", "", function(event)
         "pump"
     }
 
-    for _, type in pairs(types) do
-        for _, entity in pairs(surface.find_entities_filtered{type=type}) do
-            entity.destroy()
-        end
+    -- Delete all AI entities (optional, currently commented)
+    --for _, type in pairs(types) do
+    --    for _, entity in pairs(surface.find_entities_filtered{type = type, force = "AI"}) do
+    --        entity.destroy()
+    --    end
+    --end
+
+    -- Delete AI characters
+    for _, entity in pairs(surface.find_entities_filtered{name = "character", force = "AI"}) do
+        entity.die()
     end
 
-    for _, entity in pairs(surface.find_entities_filtered{name="character", force="AI"}) do
-        entity.teleport({x = 0, y = 0})
+    -- Delete corpses
+    for _, corpse in pairs(surface.find_entities_filtered{type = "character-corpse"}) do
+        corpse.destroy()
+    end
+
+    -- Set game speed
+    game.speed = 4
+
+    -- Spawn new AI character
+    surface.create_entity{
+        name = "character",
+        position = {x = 0, y = 0},
+        force = "AI"
+    }
+
+    -- Reset AI Force techs and queue
+    local force = game.forces["AI"]
+    if force then
+        -- Reset AI research index
+        ai_research_index = 1
+
+        -- Empty research queue
+        force.research_queue = {}
+
+        -- Reset all techs
+        for _, tech in pairs(force.technologies) do
+            tech.researched = false
+        end
+
+        -- Set starting techs researched
+        local starting_techs = {
+            "electronics",
+            "steam-power",
+            "automation-science-pack"
+        }
+        for _, tech_name in pairs(starting_techs) do
+            local tech = force.technologies[tech_name]
+            if tech then
+                tech.researched = true
+            end
+        end
+
+        -- Start first AI research from the predefined list, skip starting techs
+        while ai_research_index <= #AI_RESEARCH_QUEUE do
+            local first_tech_name = AI_RESEARCH_QUEUE[ai_research_index]
+            local tech = force.technologies[first_tech_name]
+
+            if tech and not tech.researched and not table.contains(starting_techs, first_tech_name) then
+                force.add_research(tech)
+                force.print("AI reset complete. First tech queued: " .. first_tech_name)
+                ai_research_index = ai_research_index + 1
+                break
+            end
+
+            ai_research_index = ai_research_index + 1
+        end
+    else
+        game.print("AI force not found!")
     end
 end)
+
+-- Helper function to check if a table contains a value
+function table.contains(tbl, val)
+    for _, v in pairs(tbl) do
+        if v == val then return true end
+    end
+    return false
+end
 
 commands.add_command("speed", "", function(event)
     if event.parameter then
@@ -839,7 +962,7 @@ end)
 script.on_event(defines.events.on_gui_click, function(event)
     if event.element.name == "Jimbo_button" then
         local player = game.players[event.player_index]
-        local surface = game.surfaces[1]
+        local surface = game.surfaces[2]
 
         local bot = surface.find_entities_filtered{name="character", force="AI"}[1]
 
@@ -873,4 +996,86 @@ script.on_event(defines.events.on_gui_click, function(event)
             player.print("Kein AI-Bot gefunden!")
         end
     end
+end)
+
+commands.add_command("ai_r", "Add technology to AI research queue", function(event)
+  local tech_name = event.parameter
+  if not tech_name or tech_name == "" then
+    game.print("Usage: /ai_research <technology_name>")
+    return
+  end
+
+  local force = game.forces["AI"]
+  if not force then
+    game.print("Force 'AI' not found")
+    return
+  end
+
+  local tech = force.technologies[tech_name]
+  if tech and not tech.researched then
+    force.add_research(tech_name)
+    game.print("Technology '" .. tech_name .. "' added to AI research queue")
+  elseif tech and tech.researched then
+    game.print("Technology '" .. tech_name .. "' is already researched")
+  else
+    game.print("Technology '" .. tech_name .. "' not found")
+  end
+end)
+
+-- Command: fill_queue (sicher)
+commands.add_command("fill_queue", "Fill AI research queue with next 5 technologies.", function(event)
+    local force = game.forces["AI"]
+    if not force then
+        game.print("Force 'AI' not found")
+        return
+    end
+
+    local added_count = 0
+    while added_count < 1 and ai_research_index <= #AI_RESEARCH_QUEUE do
+        local tech_name = AI_RESEARCH_QUEUE[ai_research_index]
+        local tech = force.technologies[tech_name]
+
+        if tech and not tech.researched then
+            force.add_research(tech)
+            added_count = added_count + 1
+            game.print("Added to AI queue: " .. tech_name)
+        end
+
+        ai_research_index = ai_research_index + 1
+    end
+
+    game.print("Added " .. added_count .. " technologies to AI queue.")
+end)
+
+-- Event: on_research_finished (bereits korrekt, bleibt)
+script.on_event(defines.events.on_research_finished, function(event)
+    local tech = event.research
+    local force = tech.force
+    if force.name ~= "AI" then return end
+
+    -- Wenn die Tech in der Startliste ist, nichts tun
+    if AI_START_TECHS[tech.name] then
+        force.print("Skipped AI research trigger for start tech: " .. tech.name)
+        return
+    end
+
+    -- Füge genau 1 Tech aus der Liste hinzu
+    local added_count = 0
+    while added_count < 1 and ai_research_index <= #AI_RESEARCH_QUEUE do
+        local next_tech_name = AI_RESEARCH_QUEUE[ai_research_index]
+        local next_tech = force.technologies[next_tech_name]
+
+        if next_tech and not next_tech.researched then
+            force.add_research(next_tech)
+            added_count = 1
+            force.print("Added next AI research: " .. next_tech_name)
+        end
+
+        ai_research_index = ai_research_index + 1
+    end
+end)
+
+commands.add_command("reset_ai_index", "Reset AI research index to start of the list.", function(event)
+    ai_research_index = 1
+    game.print("AI research index reset to 1.")
 end)
