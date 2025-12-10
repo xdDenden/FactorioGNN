@@ -9,6 +9,7 @@ from tqdm import tqdm
 from config import Config
 from environment import FactorioEnv
 from FactorioHGNN import FactorioHGNN
+from plotting import TrainingLogger
 import timeit
 
 # --- Hyperparameters ---
@@ -20,7 +21,7 @@ EPSILON_START = 1.0
 EPSILON_END = 0.05
 EPSILON_DECAY = 2000
 TARGET_UPDATE = 200  # Updates every 200 *gradient steps* (not env steps)
-NUM_EPISODES = 50
+NUM_EPISODES = 2
 
 
 class TimingTracker:
@@ -105,6 +106,7 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device):
 def train():
     cfg = Config()
     env = FactorioEnv(cfg)
+    logger = TrainingLogger()
 
     if torch.backends.mps.is_available():
         device = torch.device("mps")
@@ -151,6 +153,9 @@ def train():
         total_reward = 0
         step_times = []
 
+        episode_loss_accum = 0.0
+        episode_train_steps = 0
+        last_epsilon = EPSILON_START
         # === INNER PROGRESS BAR (Steps within Episode) ===
         with tqdm(range(cfg.MAX_TIMESTEPS), desc=f"Ep {episode + 1}", leave=False) as inner_bar:
 
@@ -174,6 +179,7 @@ def train():
                 t_start = timeit.default_timer()
                 epsilon = EPSILON_END + (EPSILON_START - EPSILON_END) * \
                           np.exp(-1. * env_steps_done / EPSILON_DECAY)
+                last_epsilon = epsilon
 
                 act, item, rot, map_idx, next_hidden = select_action(
                     policy_net, node_feats, H, hidden_state, epsilon, device
@@ -272,6 +278,9 @@ def train():
                         loss_val = (loss_total / BATCH_SIZE).item()
                         updates_done += 1
 
+                        episode_loss_accum += loss_val
+                        episode_train_steps += 1
+
                         if updates_done % TARGET_UPDATE == 0:
                             target_net.load_state_dict(policy_net.state_dict())
                             tqdm.write(f"--> Updated Target Net at update {updates_done}")
@@ -292,15 +301,27 @@ def train():
                     train=f"{timer.last.get('train_backward', 0)*1000:.0f}ms"
                 )
 
-                # === TIMING REPORT EVERY 100 STEPS ===
-                if steps_since_report >= 100:
+                # === TIMING REPORT EVERY 1000 STEPS ===
+                if steps_since_report >= 1000:
                     timer.print_report(steps_since_report)
                     timer.reset()
                     steps_since_report = 0
 
                 if done:
                     break
+        # === END OF EPISODE LOGGING ===
+        avg_loss = episode_loss_accum / episode_train_steps if episode_train_steps > 0 else 0.0
 
+        logger.log_episode(
+            episode=episode + 1,
+            step_count=env_steps_done,
+            reward=total_reward,
+            avg_loss=avg_loss,
+            epsilon=last_epsilon,
+            max_production=env.max_total_production_seen,
+            max_edges=env.max_edges_seen,
+            milestones=env.milestones
+        )
         # === UPDATE OUTER BAR (End of episode stats) ===
         avg_ep_time = np.mean(step_times) if step_times else 0
         outer_bar.set_postfix(LastRew=f"{total_reward:.1f}", AvgTime=f"{avg_ep_time:.3f}s")

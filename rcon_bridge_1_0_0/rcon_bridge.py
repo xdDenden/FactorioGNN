@@ -1,5 +1,6 @@
 import json
 import math
+import time
 from typing import List, Dict, Any, Optional
 import factorio_rcon
 from typing import TypedDict, Any, List
@@ -176,6 +177,22 @@ class Rcon_reciever:
     def rotate(self, x: float, y: float, direction: int) -> None:
         self._send_command_with_retry(f"/rotate {x} {y} {direction} ")
 
+    def reset(self) -> None:
+        self._send_command_with_retry("/resetsurface")
+        time.sleep(1.0)
+        self._send_command_with_retry("/reset")
+
+
+    def scan_ore(self) -> List[Dict[str, Any]]:
+        response = self._send_command_with_retry("/scan_ore")
+        if not response or not response.strip():
+            return []
+        else:
+            #ores = json.loads(response)
+            ores = []
+        return ores
+
+
 
 if __name__ == "__main__":
     receiver =  Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
@@ -183,7 +200,9 @@ if __name__ == "__main__":
         receiver.connect()
         entities = receiver.scan_entities()
         bbentities = receiver.scan_entities_boundingboxes()
+        ores = receiver.scan_ore()
         print(entities)
         print(bbentities)
+        print(ores)
     finally:
         receiver.disconnect()

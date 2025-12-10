@@ -10,11 +10,11 @@ class Config:
     RCON_PASSWORD: str = "eenie7Uphohpaim"
 
     # --- BATCH & BURST SETTINGS ---
-    COLLECTION_STEPS: int = 128  # Play this many steps (~2 seconds at 60fps)
-    TRAIN_EPOCHS: int = 32  # Then train this many times back-to-back
+    COLLECTION_STEPS: int = 512  # Play this many steps (~2 seconds at 60fps)
+    TRAIN_EPOCHS: int = 128  # Then train this many times back-to-back
     
     # RL / Training Settings
-    MAX_TIMESTEPS: int = 10000
+    MAX_TIMESTEPS: int = 1000
     Random_Seed: int = 42
 
     # Model Settings

@@ -153,7 +153,8 @@ def to_feature_row(e: Entity, bounds: Tuple[int, int, int, int]) -> Dict[str, An
     if hasattr(e, "products_finished"):
         pf = getattr(e, "products_finished")
         base["products_finished"] = int(pf) if pf is not None else None
-
+    if hasattr(e, "ore_name"):
+        base["mining_target"] = map_mining_target(getattr(e, "ore_name"))
     return base
 
 

@@ -1,12 +1,13 @@
 # environment.py
+import time
+
 import torch
 import numpy as np
-from mpmath import sqrtm
 
 import rcon_bridge_1_0_0.rcon_bridge as bridge
 import Edging
 import math
-from parsers import parse_entity, Entity
+from parsers import parse_entity, Entity, parse_resource
 from features import transform_entities, map_items, compute_bounds, unnormalize_coord
 from FactorioHGNN import preprocess_features_for_gnn, create_functional_hypergraph, create_grid_hypergraph
 from GNNtoFactorio import translateGNNtoFactorio
@@ -25,11 +26,7 @@ class FactorioEnv:
         # --- RL State Tracking ---
         self.milestones = set()
         self.max_edges_seen = 0
-
-        # Point 2: Track Global Max Production to prevent mining/rebuilding exploit
         self.max_total_production_seen = 0
-
-        # Track successful crafts for diminishing rewards
         self.successful_crafts = 0
 
         self.steps_without_action = 0
@@ -44,6 +41,11 @@ class FactorioEnv:
         try:
             self.receiver.connect()
             print("RCON Connected.")
+            self.receiver.reset()
+            time.sleep(5.0)  # Allow some time for the world to reset
+            raw_ores = self.receiver.scan_ore()
+            time.sleep(1.0)
+            self.ores = [parse_resource(o) for o in raw_ores]
             return self.get_observation()
         except Exception as e:
             print(f"Connection failed: {e}")
@@ -62,10 +64,12 @@ class FactorioEnv:
 
         # 2. Parse & Features
         entities = [parse_entity(e['machine_name'], e) for e in raw_entities]
-        self.current_bounds = compute_bounds(entities, char_info=raw_player)
+        all_entities = entities + self.ores
+
+        self.current_bounds = compute_bounds(all_entities, char_info=raw_player)
         player_info = map_items(raw_player, self.current_bounds)
 
-        features = transform_entities(entities, bounds=self.current_bounds)
+        features = transform_entities(all_entities, bounds=self.current_bounds)
         # 3. Tensors
         # Player info is inserted here into node_features
         node_features = preprocess_features_for_gnn(features, player_info=player_info)
@@ -75,8 +79,9 @@ class FactorioEnv:
         # 4. Hypergraphs
         p_pos = raw_player.get('pos', {'x': 0, 'y': 0})
         player_ent = Entity('player', int(p_pos.get('x', 0)), int(p_pos.get('y', 0)))
-        all_entities = entities + [player_ent]
-        H_grid = create_grid_hypergraph(all_entities, grid_size=10)
+
+        grid_entities = all_entities + [player_ent]
+        H_grid = create_grid_hypergraph(grid_entities, grid_size=10)
 
         # Functional (Edges)
         functional_edges = Edging.translateEntitesToEdges(self.receiver)
@@ -90,10 +95,12 @@ class FactorioEnv:
         # Combine
         # Ensure grid and func graphs match in node dimension
         if H_grid.shape[0] != H_func.shape[0]:
-            # Fallback safety in case create_grid_hypergraph behaves differently
-            max_rows = max(H_grid.shape[0], H_func.shape[0])
-            # Resize logic omitted for brevity, assuming standard flow holds
-            pass
+             # This print helps debug if it happens again
+             print(f"Shape Mismatch! Grid: {H_grid.shape}, Func: {H_func.shape}")
+             # Force match if H_func is missing nodes (unlikely with fix above)
+             if H_grid.shape[0] > H_func.shape[0]:
+                 padding = torch.zeros((H_grid.shape[0] - H_func.shape[0], H_func.shape[1]))
+                 H_func = torch.cat([H_func, padding], dim=0)
 
         H = torch.cat([H_grid, H_func], dim=1)
 
@@ -129,9 +136,10 @@ class FactorioEnv:
             self.steps_without_action += 1
             if self.steps_without_action > 5:
                 reward -= 0.5
-        else:
-            self.steps_without_action = 0
-            reward += 0.01
+        #else:
+           # self.steps_without_action = 0
+            #reward += 0.01
+
 
             # --- Successful Craft Reward ---
             if action_idx == 2:  # craft action
