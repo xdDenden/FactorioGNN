@@ -13,9 +13,9 @@ This project is the official implementation for the paper:
 
 ## The Benchmark: Factorio Learning Environment (FLE)
 
-This project aims to establish a new State-of-the-Art (SOTA) on the **Factorio Learning Environment (FLE)**, a benchmark created by Jack Hopkins to test the limits of AI planning and spatial reasoning.
+This project aims to beat the scores of the **Factorio Learning Environment (FLE)**, a benchmark created by Jack Hopkins to test the limits of AI planning and spatial reasoning. While our Project does not implement the same benchmark and gym environment. The production score however will be comparable.
 
-While Hopkins' research highlights the limitations of frontier models (like Claude 3.5 Sonnet and GPT-4o) in handling the exponential complexity of Factorio, our approach moves away from token based reasoning. Instead, we utilize a purpose-built HGNN to directly model the factory's topology, aiming to decisively beat the LLM score's Jack Hopkins et al. identified.
+While Hopkins' research highlights the limitations of frontier models (like Claude 3.5 Sonnet and GPT-4o) in handling the exponential complexity of Factorio, our approach moves away from token based reasoning. Instead, we utilize a purpose built HGNN to directly model the factory's topology, aiming to decisively beat the LLM score's Jack Hopkins et al. identified.
 
 * **FLE Repository:** [JackHopkins/factorio-learning-environment](https://github.com/JackHopkins/factorio-learning-environment)
 * **FLE Paper:** [Factorio Learning Environment (arXiv)](https://arxiv.org/abs/2503.09617)
