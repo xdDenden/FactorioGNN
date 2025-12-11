@@ -21,7 +21,7 @@ EPSILON_START = 1.0
 EPSILON_END = 0.05
 EPSILON_DECAY = 2000
 TARGET_UPDATE = 200  # Updates every 200 *gradient steps* (not env steps)
-NUM_EPISODES = 2
+NUM_EPISODES = 50
 
 
 class TimingTracker:
