@@ -23,7 +23,7 @@ While Hopkins' research highlights the limitations of frontier models (like Clau
 ## Installation
 
 * **Windows and Mac OS:**
-    * python version 3.1x or later
+    * python version 3.10.X or later
     * pip install numpy, pytorch, factorio-rcon-py, plotly, tqdm, timeit
     * Factorio Headless Linux Client https://www.factorio.com/download
     * Docker or Docker Desktop (WSL2 recommended for Windows)
@@ -55,7 +55,7 @@ While Hopkins' research highlights the limitations of frontier models (like Clau
 ## Project Structure
 
 * [TODO: Describe key directories]
-
+* [TODO: See if releases/packages are doable that dont have to be built]
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
