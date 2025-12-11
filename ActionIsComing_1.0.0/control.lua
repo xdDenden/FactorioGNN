@@ -831,8 +831,10 @@ commands.add_command("reset", "", function(event)
     nauvis_settings.peaceful_mode = true
     nauvis_settings.no_enemies_mode = true
     nauvis_settings.cliff_settings = {richness = 0}
-    nauvis_settings.height = 300
-    nauvis_settings.width = 300
+    nauvis_settings.height = 1000
+    nauvis_settings.width = 1000
+    nauvis_settings.starting_area = 3
+
 
     -- Erstelle die neue Surface mit den modifizierten Nauvis-Settings
     local surface = game.create_surface("Test Surface", nauvis_settings)
