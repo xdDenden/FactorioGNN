@@ -2,6 +2,8 @@
 
 **FactorioHGNN** is a specialized AI project designed to solve open ended logistic and optimization problems within the game *Factorio* using Hypergraph Neural Networks (HGNNs).
 
+CURRENTLY WE **DO NOT** RECOMMEND YOU INSTALL THIS. This is a prealpha in development version that has yet to be thoroughly tested. Also were limiting the game to red circuits without any mods or dlcs. 
+
 Unlike generic Large Language Models (LLMs) that struggle with spatial reasoning and long term planning in complex logistical environments, FactorioHGNN leverages the natural graph structure of factories where belts, inserters, and assemblers form hyper edges in a graph to achieve superior reasoning capabilities.
 
 ## Research Paper
