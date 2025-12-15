@@ -188,8 +188,8 @@ class Rcon_reciever:
         if not response or not response.strip():
             return []
         else:
-            #ores = json.loads(response)
-            ores = []
+            ores = json.loads(response)
+            #ores = []
         return ores
 
 

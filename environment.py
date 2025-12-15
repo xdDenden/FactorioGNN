@@ -11,7 +11,7 @@ from parsers import parse_entity, Entity, parse_resource
 from features import transform_entities, map_items, compute_bounds, unnormalize_coord
 from FactorioHGNN import preprocess_features_for_gnn, create_functional_hypergraph, create_grid_hypergraph
 from GNNtoFactorio import translateGNNtoFactorio
-
+from ActionMasking import get_action_masks
 
 class FactorioEnv:
     def __init__(self, config):
@@ -43,7 +43,14 @@ class FactorioEnv:
             print("RCON Connected.")
             self.receiver.reset()
             time.sleep(5.0)  # Allow some time for the world to reset
-            raw_ores = self.receiver.scan_ore()
+            #raw_ores = self.receiver.scan_ore()
+            # we disable ores for now because we dont yet know if the AI needs this information/if its possible to
+            # give the ai this information without significantly slowing down the training process
+            # there are just too many individual ores nodes. Some kind of batching or clustering would be needed.
+            # for now we just set ores to an empty list so that the logic for ores is still there for future use
+            #TODO: implement ore batching/clustering if needed
+            raw_ores = []
+
             time.sleep(1.0)
             self.ores = [parse_resource(o) for o in raw_ores]
             return self.get_observation()

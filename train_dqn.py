@@ -6,10 +6,14 @@ import numpy as np
 import random
 from collections import deque, defaultdict
 from tqdm import tqdm
+
+from OrePatchDetector import OrePatchDetector
 from config import Config
 from environment import FactorioEnv
 from FactorioHGNN import FactorioHGNN
 from plotting import TrainingLogger
+from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
+from ActionMasking import get_action_masks
 import timeit
 
 # --- Hyperparameters ---
@@ -78,29 +82,88 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-def select_action(model, node_feats, H, hidden_state, epsilon, device):
-    """Epsilon-Greedy Policy for Branching Output"""
-    if random.random() < epsilon:
-        # Random Exploration
-        act = random.randint(0, 7)  # 8 Actions
-        item = random.randint(0, 50)  # Approx Items
-        rot = random.randint(0, 3)  # 4 Rotations
-        heatmap_idx = random.randint(0, 17 * 17 - 1)  # 289 locations
+def apply_mask_to_logits(logits, mask):
+    """
+    Sets logits to -inf where mask is 0.
+    logits: Tensor
+    mask: Numpy array or Tensor (0/1)
+    """
+    # Create a tensor mask on the same device
+    if not isinstance(mask, torch.Tensor):
+        mask_t = torch.tensor(mask, device=logits.device, dtype=torch.bool)
+    else:
+        mask_t = mask.bool()
 
-        # Return dummy hidden state for continuity
+    # Fill illegal actions with -inf
+    # clone to avoid in-place modification errors if needed
+    masked_logits = logits.clone()
+    masked_logits[~mask_t] = -1e9
+    return masked_logits
+
+
+def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
+    """
+    Epsilon-Greedy with Action Masking.
+    masks: (action_mask, item_mask, spatial_mask) from ActionMasking.py
+    """
+    act_mask, item_mask, space_mask = masks
+
+    if random.random() < epsilon:
+        # --- MASKED RANDOM EXPLORATION ---
+
+        # 1. Select Action from valid indices
+        valid_actions = np.nonzero(act_mask)[0]
+        if len(valid_actions) == 0:
+            act = 0 # Fallback to No-Op
+        else:
+            act = random.choice(valid_actions)
+
+        # 2. Select Item from valid indices FOR THAT ACTION
+        # item_mask is [num_actions, num_items]
+        valid_items = np.nonzero(item_mask[act])[0]
+        if len(valid_items) == 0:
+            item = 0 # Default/No-Item
+        else:
+            item = random.choice(valid_items)
+
+        # 3. Select Rotation (Unmasked for now)
+        rot = random.randint(0, 3)
+
+        # 4. Select Heatmap Location from valid indices FOR THAT ACTION
+        # space_mask is [num_actions, grid_size]
+        valid_locs = np.nonzero(space_mask[act])[0]
+        if len(valid_locs) == 0:
+            heatmap_idx = 0 # Default
+        else:
+            heatmap_idx = random.choice(valid_locs)
+
+        # Return dummy hidden state
         h_next = (torch.zeros(1, 256).to(device), torch.zeros(1, 256).to(device))
         return act, item, rot, heatmap_idx, h_next
+
     else:
-        # Greedy Exploitation
+        # --- MASKED GREEDY EXPLOITATION ---
         with torch.no_grad():
             q_act, q_item, q_rot, q_map, h_next = model(node_feats, H, hidden_state)
 
-            act = q_act.argmax().item()
-            item = q_item.argmax().item()
+            # 1. Mask Action Logits
+            masked_q_act = apply_mask_to_logits(q_act.view(-1), act_mask)
+            act = masked_q_act.argmax().item()
+
+            # 2. Mask Item Logits (based on chosen action)
+            # q_item is [1, num_items], item_mask[act] is [num_items]
+            masked_q_item = apply_mask_to_logits(q_item.view(-1), item_mask[act])
+            item = masked_q_item.argmax().item()
+
+            # 3. Rotation (Unmasked)
             rot = q_rot.argmax().item()
-            heatmap_idx = q_map.view(-1).argmax().item()
+
+            # 4. Mask Heatmap (based on chosen action)
+            masked_q_map = apply_mask_to_logits(q_map.view(-1), space_mask[act])
+            heatmap_idx = masked_q_map.argmax().item()
 
             return act, item, rot, heatmap_idx, h_next
+
 
 
 def train():
@@ -126,6 +189,7 @@ def train():
     memory = ReplayBuffer(BUFFER_SIZE)
     criterion = nn.MSELoss()
 
+
     # Counters
     env_steps_done = 0
     updates_done = 0
@@ -139,6 +203,36 @@ def train():
     outer_bar = tqdm(range(NUM_EPISODES), desc="Total Progress", unit="ep")
 
     for episode in outer_bar:
+
+        # initalize ore map to know what to mine and where
+        # save it to a file for use in ActionMasking
+        # only need to do this once per episode because thats when the map resets
+        # also time between episodes is long enough to not worry about timing this or it slowing down training
+        receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
+        ore_map = receiver_ore.scan_ore()
+
+        # Save as JSON instead of string representation
+        import json
+        with open("ore_map.json", "w") as ore_file:
+            json.dump(ore_map, ore_file)
+        receiver_ore.disconnect()
+
+        # Then process the ores map for use in ActionMasking
+        # The ores will be converted from millions of individual nodes into a smaller number of patches
+        # this is necessary for performance reasons
+        with open("ore_map.json", "r") as f:
+            ore_data = json.load(f)  # This loads it as a proper list of dicts
+
+        detector = OrePatchDetector(ore_data)
+        patches = detector.process_patches()
+
+        with open("patches.json", "w") as patches_file:
+            # Save patches too (without the polygon objects though)
+            patches_serializable = [{k: v for k, v in p.items() if k != 'polygon'} for p in patches]
+            json.dump(patches_serializable, patches_file)
+
+        #again we will save the patches to a file for use in ActionMasking
+
         # --- Time: Reset ---
         t_start = timeit.default_timer()
         obs = env.reset()
@@ -175,6 +269,27 @@ def train():
                 H = H.to(device)
                 timer.record('preproc_to_device', timeit.default_timer() - t_start)
 
+                # 3. Calculate MASKS
+                t_start = timeit.default_timer()
+
+                # Extract state info from env for masking
+                raw_entities = env._last_raw_entities
+                raw_player = env._last_raw_player
+                # Convert inventory list to dict {name: count}
+                inv_list = raw_player.get('inventory', [])
+                inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
+                bounds = env.current_bounds
+
+                masks = get_action_masks(
+                    entities=raw_entities,
+                    player_info=raw_player,
+                    inventory=inventory,
+                    science_level=1, # Placeholder
+                    bounds=bounds,
+                    patches = patches
+                )
+                timer.record('mask_calc', timeit.default_timer() - t_start)
+
                 # --- Time: Action Selection ---
                 t_start = timeit.default_timer()
                 epsilon = EPSILON_END + (EPSILON_START - EPSILON_END) * \
@@ -182,7 +297,7 @@ def train():
                 last_epsilon = epsilon
 
                 act, item, rot, map_idx, next_hidden = select_action(
-                    policy_net, node_feats, H, hidden_state, epsilon, device
+                    policy_net, node_feats, H, hidden_state, epsilon, device,masks
                 )
 
                 # Convert Heatmap Index -> Norm Coords

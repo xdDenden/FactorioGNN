@@ -1,11 +1,18 @@
 # main.py
 import torch
 import traceback
-import random  # Needed for epsilon-greedy
+import random
+import numpy as np
 from config import Config
 from environment import FactorioEnv
 from FactorioHGNN import FactorioHGNN
+from ActionMasking import get_action_masks
 
+def apply_mask_to_logits(logits, mask):
+    mask_t = torch.tensor(mask, device=logits.device, dtype=torch.bool)
+    masked_logits = logits.clone()
+    masked_logits[~mask_t] = -1e9
+    return masked_logits
 
 # /c game.speed = 4
 #test
@@ -19,13 +26,22 @@ def main():
     # 2. Initialize Model
     use_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
     device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if use_mps else "cpu"))
+    print(f"Running on {device}")
     model = FactorioHGNN(
         hidden_dim=cfg.HIDDEN_DIM,
         lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM
     ).to(device)
 
+   # Load weights if available
+    try:
+        model.load_state_dict(torch.load("jimbo_dqn_weights.pth", map_location=device))
+        print("Loaded weights from jimbo_dqn_weights.pth")
+    except FileNotFoundError:
+        print("No weights found, running with random init.")
+
     model.eval()
     hidden_state = None
+
 
     # Point 1: Epsilon-Greedy Setup
     epsilon = 0.2  # Exploration rate (could be moved to Config)
@@ -44,6 +60,21 @@ def main():
             node_features = node_features.to(device)
             H = H.to(device)
 
+            # --- MASK GENERATION ---
+            raw_entities = env._last_raw_entities
+            raw_player = env._last_raw_player
+            inv_list = raw_player.get('inventory', [])
+            inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
+            bounds = env.current_bounds
+
+            act_mask, item_mask, space_mask = get_action_masks(
+                entities=raw_entities,
+                player_info=raw_player,
+                inventory=inventory,
+                science_level=1,
+                bounds=bounds
+            )
+
             # B. Model Inference
             with torch.no_grad():
                 (action_logits,
@@ -54,20 +85,37 @@ def main():
 
             # C. Select Action - Point 1: Epsilon Greedy
             if random.random() < epsilon:
-                # Random Exploration
-                action_idx = random.randint(0, action_logits.shape[-1] - 1)
-                item_idx = random.randint(0, item_logits.shape[-1] - 1)
-                rotation_idx = random.randint(0, rotation_logits.shape[-1] - 1)
-                # Random heatmap pos
-                x_grid_idx = random.randint(0, 16)
-                y_grid_idx = random.randint(0, 16)
+                # --- MASKED RANDOM ---
+                valid_actions = np.nonzero(act_mask)[0]
+                action_idx = random.choice(valid_actions) if len(valid_actions) > 0 else 0
+
+                valid_items = np.nonzero(item_mask[action_idx])[0]
+                item_idx = random.choice(valid_items) if len(valid_items) > 0 else 0
+
+                rotation_idx = random.randint(0, 3)
+
+                valid_locs = np.nonzero(space_mask[action_idx])[0]
+                flat_map_idx = random.choice(valid_locs) if len(valid_locs) > 0 else 0
+
+                y_grid_idx = flat_map_idx // 17
+                x_grid_idx = flat_map_idx % 17
+
             else:
-                # Greedy Exploitation
-                action_idx = torch.argmax(action_logits).item()
-                item_idx = torch.argmax(item_logits).item()
+                # --- MASKED GREEDY ---
+                # 1. Action
+                masked_act_logits = apply_mask_to_logits(action_logits.view(-1), act_mask)
+                action_idx = torch.argmax(masked_act_logits).item()
+
+                # 2. Item
+                masked_item_logits = apply_mask_to_logits(item_logits.view(-1), item_mask[action_idx])
+                item_idx = torch.argmax(masked_item_logits).item()
+
+                # 3. Rotation
                 rotation_idx = torch.argmax(rotation_logits).item()
 
-                flat_max_idx = torch.argmax(heatmap_logits)
+                # 4. Heatmap
+                masked_map_logits = apply_mask_to_logits(heatmap_logits.view(-1), space_mask[action_idx])
+                flat_max_idx = torch.argmax(masked_map_logits)
                 y_grid_idx = (flat_max_idx // 17).item()
                 x_grid_idx = (flat_max_idx % 17).item()
 
