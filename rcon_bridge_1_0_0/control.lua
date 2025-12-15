@@ -329,6 +329,24 @@ local function scan_resources()
     return json.encode(resources_list)
 end
 
+local function scan_research()
+    local research_list = {}
+    local force = game.forces["AI"]
+
+    --Going through Science
+    for name, technology in pairs(force.technologies) do
+        if technology.researched then
+            local tech_data = {
+                name = name,
+                researched = true
+            }
+            table.insert(research_list, tech_data)
+        end
+    end
+
+    return json.encode(research_list)
+end
+
 -- Neuer RCON Command für Assembler
 commands.add_command("scan_entities", "Returns JSON list of assemblers", function(event)
     local json_str = scan_entities()
@@ -343,6 +361,15 @@ end)
 -- Neuer RCON Command für Assembler
 commands.add_command("scan_entities_boundingboxes", "Returns JSON list of assemblers", function(event)
     local json_str = scan_entities_boundingboxes()
+    if event.player_index == nil then
+        rcon.print(json_str)
+    else
+        game.players[event.player_index].print(json_str)
+    end
+end)
+
+commands.add_command("scan_research", "You get everything Researched | I get nothing", function(event)
+    local json_str = scan_research()
     if event.player_index == nil then
         rcon.print(json_str)
     else
