@@ -1,4 +1,3 @@
-# train_dqn.py
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -17,15 +16,15 @@ from ActionMasking import get_action_masks
 import timeit
 
 # --- Hyperparameters ---
-GAMMA = 0.99
-LR = 1e-4
-BATCH_SIZE = 32
-BUFFER_SIZE = 10000
-EPSILON_START = 1.0
-EPSILON_END = 0.05
-EPSILON_DECAY = 2000
-TARGET_UPDATE = 200  # Updates every 200 *gradient steps* (not env steps)
-NUM_EPISODES = 50
+GAMMA = 0.99  # Discount factor for future rewards
+LR = 1e-4  # Learning rate for the optimizer
+BATCH_SIZE = 32  # Number of samples per training batch
+BUFFER_SIZE = 50000  # Maximum size of the replay buffer
+EPSILON_START = 1.0  # Initial value of epsilon for epsilon-greedy policy
+EPSILON_END = 0.05  # Minimum value of epsilon for epsilon-greedy policy
+EPSILON_DECAY = 25000  # Decay rate for epsilon over time
+TARGET_UPDATE = 200  # Frequency of target network updates (in gradient steps)
+NUM_EPISODES = 50  # Total number of episodes to train the model
 
 
 class TimingTracker:
@@ -278,6 +277,7 @@ def train():
                 # Convert inventory list to dict {name: count}
                 inv_list = raw_player.get('inventory', [])
                 inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
+
                 bounds = env.current_bounds
 
                 masks = get_action_masks(
@@ -289,6 +289,16 @@ def train():
                     patches = patches
                 )
                 timer.record('mask_calc', timeit.default_timer() - t_start)
+
+                # --- DEBUG PRINT (Check once per 100 steps) ---
+                if t % 100 == 0:
+                    act_mask, item_mask, space_mask = masks
+                    print(f"\n[DEBUG Step {t}] Action Mask: {act_mask}")
+                    print(f"Inventory: {inventory}")
+                    if act_mask[2] == 1.0:
+                        print("Crafting is VALID.")
+                    else:
+                        print("Crafting is BLOCKED.")
 
                 # --- Time: Action Selection ---
                 t_start = timeit.default_timer()

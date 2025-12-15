@@ -2,6 +2,7 @@ import numpy as np
 from scipy.spatial import ConvexHull
 from sklearn.cluster import DBSCAN
 from shapely.geometry import Point, Polygon
+from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
 
 
 class OrePatchDetector:
@@ -98,20 +99,17 @@ class OrePatchDetector:
 
 # Example usage:
 if __name__ == "__main__":
-    # Sample data
-    sample_data = [
-        {'name': 'crude-oil', 'x': -249.5, 'y': -643.5},
-        {'name': 'copper-ore', 'x': 365.5, 'y': -596.5},
-        {'name': 'copper-ore', 'x': 366.5, 'y': -597.5},
-        {'name': 'copper-ore', 'x': 367.5, 'y': -597.5},
-        {'name': 'copper-ore', 'x': 366.5, 'y': -596.5},
-        {'name': 'copper-ore', 'x': 367.5, 'y': -596.5},
-        {'name': 'copper-ore', 'x': 368.5, 'y': -597.5},
-        {'name': 'copper-ore', 'x': 368.5, 'y': -596.5},
-    ]
+
+    receiver = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
+    try:
+        receiver.connect()
+        ores=receiver.scan_ore()
+    except Exception as e:
+        print(f"Failed to connect to RCON or fetch ores: {e}")
+        ores = []
 
     # Create detector and process patches
-    detector = OrePatchDetector(sample_data, eps=5.0, min_samples=3)
+    detector = OrePatchDetector(ores, eps=5.0, min_samples=3)
     patches = detector.process_patches()
 
     print(f"Found {len(patches)} ore patches\n")
@@ -125,6 +123,6 @@ if __name__ == "__main__":
         print()
 
     # Test if position is in patch
-    test_x, test_y = 367.0, -597.0
+    test_x, test_y = 15.0, -54.0
     matches = detector.is_position_in_patch(test_x, test_y)
     print(f"Position ({test_x}, {test_y}) is in {len(matches)} patch(es)")

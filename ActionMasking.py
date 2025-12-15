@@ -121,7 +121,7 @@ def world_to_grid(x: float, y: float, bounds: Tuple[int, int, int, int], grid_st
     return grid_x, grid_y
 
 
-def check_reach(p_x, p_y, t_x, t_y, max_dist=10.0):
+def check_reach(p_x, p_y, t_x, t_y, max_dist=50.0):
     """Checks if target (t_x, t_y) is within reach of player (p_x, p_y)."""
     return math.sqrt((p_x - t_x) ** 2 + (p_y - t_y) ** 2) <= max_dist
 
@@ -157,8 +157,8 @@ def get_action_masks(
                      (Rows correspond to actions. E.g., spatial_mask[MINE] shows tiles with ore)
     """
 
-    num_actions = len(ACTION_MAP)  # ~8 based on mappings.py
-    num_items = len(ITEM_MAP) + 1  # +1 for 0-index safety
+    num_actions = len(ACTION_MAP)
+    num_items = len(ITEM_MAP)
     grid_size = grid_steps * grid_steps
 
     # Initialize masks (Default to 0/False)
@@ -230,22 +230,23 @@ def get_action_masks(
     flat_reach_mask = reach_grid.flatten()
 
     # ==========================================
-    # 1. ACTION: NONE (0)
+    # 0. ACTION: NONE (0)
     # ==========================================
-    action_mask[0] = 1.0  # Always legal to do nothing
-    item_mask[0, :] = 1.0  # Args irrelevant
+    #action_mask[0] = 1.0  # Always legal to do nothing
+    #item_mask[0, :] = 1.0  # Args irrelevant
+    #spatial_mask[0, :] = 1.0
+
+    # ==========================================
+    # 0. ACTION: MOVE_TO (0)
+    # ==========================================
+    # Always legal to try moving (pathfinding handles the rest)
+    action_mask[0] = 1.0
+    item_mask[0, :] = 0.0  # Clear all
+    item_mask[0, 0] = 1.0  # CHANGE 2: Only allow 'None' (ID 0) for movement
     spatial_mask[0, :] = 1.0
 
     # ==========================================
-    # 2. ACTION: MOVE_TO (1)
-    # ==========================================
-    # Always legal to try moving (pathfinding handles the rest)
-    action_mask[1] = 1.0
-    item_mask[1, :] = 1.0
-    spatial_mask[1, :] = 1.0  # Can click anywhere
-
-    # ==========================================
-    # 3. ACTION: MINE (2)
+    # 1. ACTION: MINE (1)
     # ==========================================
     can_mine_any = False
 
@@ -275,16 +276,16 @@ def get_action_masks(
                         break
 
             if is_mineable:
-                spatial_mask[2, flat_idx] = 1.0
+                spatial_mask[1, flat_idx] = 1.0
                 can_mine_any = True
 
     if can_mine_any:
-        action_mask[2] = 1.0
+        action_mask[1] = 1.0
 
-    item_mask[2, :] = 1.0  # Item arg irrelevant for mining
+    item_mask[1, :] = 1.0  # Item arg irrelevant for mining
 
     # ==========================================
-    # 4. ACTION: CRAFT (3)
+    # 2. ACTION: CRAFT (2)
     # ==========================================
     # Legal IF: Player has ingredients for at least one recipe
     can_craft_any = False
@@ -300,15 +301,15 @@ def get_action_masks(
         if craftable:
             item_id = ITEM_MAP.get(item_name, 0)
             if item_id > 0:
-                item_mask[3, item_id] = 1.0
+                item_mask[2, item_id] = 1.0
                 can_craft_any = True
 
     if can_craft_any:
-        action_mask[3] = 1.0
-        spatial_mask[3, :] = 1.0  # Location irrelevant for crafting
+        action_mask[2] = 1.0
+        spatial_mask[2, :] = 1.0  # Location irrelevant for crafting
 
     # ==========================================
-    # 5. ACTION: BUILD (4)
+    # 3. ACTION: BUILD (3)
     # ==========================================
     # Legal IF: Player has the item AND target is empty AND within reach
     can_build_any = False
@@ -319,18 +320,18 @@ def get_action_masks(
             item_id = MACHINE_NAME_MAP.get(item_name, 0)
             # Simple check: is it in our ID map? (Assumes map implies buildable)
             if item_id > 0:
-                item_mask[4, item_id] = 1.0
+                item_mask[3, item_id] = 1.0
                 can_build_any = True
 
     # 2. Check Spatial (Empty + Reach)
     valid_build_locs = flat_empty_mask & flat_reach_mask
 
     if can_build_any and np.any(valid_build_locs):
-        action_mask[4] = 1.0
-        spatial_mask[4, :] = valid_build_locs.astype(np.float32)
+        action_mask[3] = 1.0
+        spatial_mask[3, :] = valid_build_locs.astype(np.float32)
 
     # ==========================================
-    # 6. ACTION: INSERT_INTO (5)
+    # 4. ACTION: INSERT_INTO (4)
     # ==========================================
     # Legal IF: Entity at target (to insert into) + Item in hand
     # We allow inserting any item for now, or you can filter by inventory
@@ -338,35 +339,35 @@ def get_action_masks(
     valid_targets = flat_entity_mask & flat_reach_mask  # Must insert INTO something
 
     if has_items and np.any(valid_targets):
-        action_mask[5] = 1.0
-        spatial_mask[5, :] = valid_targets.astype(np.float32)
+        action_mask[4] = 1.0
+        spatial_mask[4, :] = valid_targets.astype(np.float32)
         # Enable all items in inventory
         for item_name, count in inventory.items():
             if count > 0:
                 iid = ITEM_MAP.get(item_name, 0)
-                item_mask[5, iid] = 1.0
+                item_mask[4, iid] = 1.0
 
     # ==========================================
-    # 7. ACTION: TAKE (6)
+    # 5. ACTION: TAKE (5)
     # ==========================================
     # Legal IF: Entity at target (to take from)
     if np.any(valid_targets):
-        action_mask[6] = 1.0
-        spatial_mask[6, :] = valid_targets.astype(np.float32)
-    item_mask[6, :] = 1.0  # Item arg irrelevant
+        action_mask[5] = 1.0
+        spatial_mask[5, :] = valid_targets.astype(np.float32)
+    item_mask[5, :] = 1.0  # Item arg irrelevant
 
     # ==========================================
-    # 8. ACTION: CHANGE_RECIPE (7)
+    # 6. ACTION: CHANGE_RECIPE (6)
     # ==========================================
     # Legal IF: Entity at target
     if np.any(valid_targets):
-        action_mask[7] = 1.0
-        spatial_mask[7, :] = valid_targets.astype(np.float32)
+        action_mask[6] = 1.0
+        spatial_mask[6, :] = valid_targets.astype(np.float32)
         # Enable all valid recipes
         # For simplicity, we enable all items that act as recipe outputs
         for name, _ in RECIPES.items():
             iid = ITEM_MAP.get(name, 0)
             if iid > 0:
-                item_mask[7, iid] = 1.0
+                item_mask[6, iid] = 1.0
 
     return action_mask, item_mask, spatial_mask

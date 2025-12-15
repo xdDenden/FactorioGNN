@@ -354,7 +354,7 @@ commands.add_command("moveto", "", function(event)
             target = {x = target_x, y = target_y}
         }
 
-        --game.print("char walks to: " .. target_x .. ", " .. target_y)
+        game.print("char walks to: " .. target_x .. ", " .. target_y)
     end
 end)
 
@@ -382,7 +382,7 @@ script.on_event(defines.events.on_tick, function(event)
                 moving_characters[id] = nil
                 character.teleport({x = target.x + 0.5, y = target.y + 0.5})
                 character.walking_state = {walking = false}
-                --game.print("arrived at position")
+                game.print("arrived at position")
 
             else
                 local direction
@@ -508,22 +508,6 @@ end)
 -- Gives character information
 -- Position and Inventory
 commands.add_command("char_info", "", function(event)
-  local player = nil
-
-  -- Check if the command was run by a player or the server
-  if event.player_index then
-    player = game.players[event.player_index]
-  end
-
-  -- Helper function to print to the correct target (Player or Server Console)
-  local function output(msg)
-    if player then
-      --player.print(msg)
-    else
-      --game.print(msg) -- Prints to everyone/console if run by server
-    end
-  end
-
   local surface = game.surfaces[2]
 
   -- Find AI Character
@@ -533,30 +517,23 @@ commands.add_command("char_info", "", function(event)
   }
 
   if #ai_characters == 0 then
-    output("No AI Character found.")
-    return
+    -- Return an empty/error object as JSON
+    return json.encode({status = "FAILED", message = "No AI Character found."})
   end
 
   local character = ai_characters[1]
-
-  -- Output Position
   local pos = character.position
-  output("Position: x=" .. pos.x .. ", y=" .. pos.y)
-
-  -- Check Inventory
   local inventory = character.get_main_inventory()
 
-  if not inventory then
-    output("  - No Inventory")
-    return
-  end
+  -- Data container to return
+  local result = {
+    status = "SUCCESS",
+    pos = {x = pos.x, y = pos.y},
+    inventory = {}
+  }
 
-  local slot_count = #inventory
-
-  if inventory.is_empty() then
-    output("  - Empty")
-  else
-    -- Collect all items
+  if inventory and not inventory.is_empty() then
+    local slot_count = #inventory
     local item_counts = {}
 
     for i = 1, slot_count do
@@ -565,19 +542,13 @@ commands.add_command("char_info", "", function(event)
         local name = stack.name
         local count = stack.count
 
-        if item_counts[name] then
-          item_counts[name] = item_counts[name] + count
-        else
-          item_counts[name] = count
-        end
+        -- Collect items into a single list of objects (better for Python parsing)
+        table.insert(result.inventory, {name = name, count = count})
       end
     end
-
-    -- Output
-    for item_name, total_count in pairs(item_counts) do
-      output("  - " .. item_name .. ": " .. total_count)
-    end
   end
+
+  return json.encode(result)
 end)
 
 --Insert items from the character into a machine
@@ -617,6 +588,11 @@ commands.add_command("insert_into", "AI Character inserts items into machine: /i
     end
 
     -- Prüfe ob Character das Item hat
+    if character.get_item_count(item_name) == "none"
+    then
+        game.print("char has no " .. item_name .. "!")
+        return
+    end
     local item_count = character.get_item_count(item_name)
     if item_count < count then
         game.print("char has " .. item_count .. "x " .. item_name .. "!")

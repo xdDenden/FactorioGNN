@@ -3,10 +3,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import os
 
-#delete file if exists
-if os.path.exists("training_log.csv"):
-    os.remove("training_log.csv")
-
 LOG_FILE = "training_log.csv"
 
 

@@ -1,9 +1,7 @@
-# environment.py
+import json
 import time
-
 import torch
 import numpy as np
-
 import rcon_bridge_1_0_0.rcon_bridge as bridge
 import Edging
 import math
@@ -12,6 +10,18 @@ from features import transform_entities, map_items, compute_bounds, unnormalize_
 from FactorioHGNN import preprocess_features_for_gnn, create_functional_hypergraph, create_grid_hypergraph
 from GNNtoFactorio import translateGNNtoFactorio
 from ActionMasking import get_action_masks
+from OrePatchDetector import OrePatchDetector
+
+
+class PatchNode:
+    """Helper class to represent an ore patch center as a graph node."""
+    def __init__(self, ore_name, x, y):
+        # type is set to something not in MACHINE_NAME_MAP so it maps to 0 (None)
+        self.type = "resource-patch"
+        self.x = x
+        self.y = y
+        # features.py looks for 'ore_name' to set the mining_target feature
+        self.ore_name = ore_name
 
 class FactorioEnv:
     def __init__(self, config):
@@ -28,7 +38,8 @@ class FactorioEnv:
         self.max_edges_seen = 0
         self.max_total_production_seen = 0
         self.successful_crafts = 0
-
+         # Store patch nodes here so we don't re-calculate them every step
+        self.patch_nodes = []
         self.steps_without_action = 0
 
     def reset(self):
@@ -37,22 +48,33 @@ class FactorioEnv:
         self.max_total_production_seen = 0
         self.successful_crafts = 0
         self.steps_without_action = 0
+        self.patch_nodes = []
 
         try:
             self.receiver.connect()
             print("RCON Connected.")
             self.receiver.reset()
             time.sleep(5.0)  # Allow some time for the world to reset
-            #raw_ores = self.receiver.scan_ore()
-            # we disable ores for now because we dont yet know if the AI needs this information/if its possible to
-            # give the ai this information without significantly slowing down the training process
-            # there are just too many individual ores nodes. Some kind of batching or clustering would be needed.
-            # for now we just set ores to an empty list so that the logic for ores is still there for future use
-            #TODO: implement ore batching/clustering if needed
-            raw_ores = []
+
+            # 1. Scan Ores ONCE per episode
+            raw_ores = self.receiver.scan_ore()
 
             time.sleep(1.0)
-            self.ores = [parse_resource(o) for o in raw_ores]
+            # 2. Process into Patches (Mid-points)
+            # This significantly reduces graph size (1000s of ore nodes -> ~10 patch nodes)
+            if raw_ores:
+                detector = OrePatchDetector(raw_ores)
+                patches = detector.process_patches()
+
+                for p in patches:
+                    center = p['center']
+                    # Create a virtual node for the graph
+                    self.patch_nodes.append(
+                        PatchNode(p['ore_type'], center[0], center[1])
+                    )
+
+                print(f"Processed {len(raw_ores)} ore entities into {len(self.patch_nodes)} patch centers.")
+
             return self.get_observation()
         except Exception as e:
             print(f"Connection failed: {e}")
@@ -70,8 +92,8 @@ class FactorioEnv:
 
 
         # 2. Parse & Features
-        entities = [parse_entity(e['machine_name'], e) for e in raw_entities]
-        all_entities = entities + self.ores
+        machine_entities = [parse_entity(e['machine_name'], e) for e in raw_entities]
+        all_entities = machine_entities + self.patch_nodes
 
         self.current_bounds = compute_bounds(all_entities, char_info=raw_player)
         player_info = map_items(raw_player, self.current_bounds)
@@ -91,6 +113,7 @@ class FactorioEnv:
         H_grid = create_grid_hypergraph(grid_entities, grid_size=10)
 
         # Functional (Edges)
+        # Note: Edges usually only exist between machines, not ore patches,
         functional_edges = Edging.translateEntitesToEdges(self.receiver)
         self._current_edge_count = len(functional_edges)
 
@@ -143,9 +166,9 @@ class FactorioEnv:
             self.steps_without_action += 1
             if self.steps_without_action > 5:
                 reward -= 0.5
-        #else:
-           # self.steps_without_action = 0
-            #reward += 0.01
+        else:
+            #self.steps_without_action = 0
+            #reward += 0.05
 
 
             # --- Successful Craft Reward ---

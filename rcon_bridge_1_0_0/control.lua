@@ -13,12 +13,12 @@ end)
 
 local function scan_entities()
     local entities_list = {}
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
     
     -- Alle Entities finden (kannst mehrere types hinzufügen)
 	local entities = surface.find_entities_filtered{
 		position = {0, 0},  -- Spawn position (oder player position wenn jemand online)
-		radius = 100000,  -- Scan Radius
+		radius = 1000,  -- Scan Radius
 		type = {
 			"assembling-machine",
 			"furnace",
@@ -222,7 +222,7 @@ end
 
 local function scan_resources()
     local resources_list = {}
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
 
 
     local resources = surface.find_entities_filtered{
@@ -255,7 +255,7 @@ end
 
 local function scan_entities_boundingboxes()
 	local entities_list = {}
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
     
     -- Alle Entities finden (kannst mehrere types hinzufügen)
 	local entities = surface.find_entities_filtered{
@@ -298,7 +298,7 @@ end
 
 local function scan_resources()
     local resources_list = {}
-    local surface = game.surfaces[1]
+    local surface = game.surfaces[2]
 
 
     local resources = surface.find_entities_filtered{
@@ -348,16 +348,4 @@ commands.add_command("scan_entities_boundingboxes", "Returns JSON list of assemb
     else
         game.players[event.player_index].print(json_str)
     end
-end)
-
-commands.add_command("scan_ore", "Returns JSON list of resources", function(event)
-    local json_str = scan_resources()
-    if event.player_index == nil then
-        rcon.print(json_str)
-    else
-        game.players[event.player_index].print(json_str)
-    end
-
-    -- In den Game Chat
-    --game.print("Resources scanned! Found resources on the map.")
 end)

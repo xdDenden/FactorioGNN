@@ -171,19 +171,18 @@ ITEM_MAP: Dict[str, int] = {
 
 }
 ACTION_MAP = {
-    "none": 0,
-    "moveto": 1,
-    "mine": 2,
-    "craft": 3,
-    "build": 4,
-    "insert_into": 5,
-    "take": 6,
-    "change_recipe":7
+    #"none": 0,
+    "moveto": 0,
+    "mine": 1,
+    "craft": 2,
+    "build": 3,
+    "insert_into": 4,
+    "take": 5,
+    "change_recipe": 6
 }
 
 # --- REVERSE MAPPINGS (For Jimbo/Logging) ---
 # These allow O(1) lookup from ID -> Name without searching
 ID_TO_ACTION = {v: k for k, v in ACTION_MAP.items()}
 ID_TO_ITEM = {v: k for k, v in ITEM_MAP.items()}
-ID_TO_RECIPE = {v: k for k, v in RECIPE_MAP.items()}
 ID_TO_RECIPE = {v: k for k, v in RECIPE_MAP.items()}

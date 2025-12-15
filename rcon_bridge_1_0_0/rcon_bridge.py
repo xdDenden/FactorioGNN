@@ -85,13 +85,17 @@ class Rcon_reciever:
                 print(f"RCON Connection lost ({e}). Attempting to reconnect...")
                 try:
                     self.connect()
+                    time.sleep(0.1)
                     return self._rcon.send_command(command)
                 except Exception as retry_e:
                     print(f"Reconnection failed: {retry_e}")
                     raise retry_e
             else:
-                # If it's a different error (e.g. JSON decode), raise it.
-                raise e
+                try:
+                    time.sleep(0.1)
+                    return self._rcon.send_command(command)
+                except Exception as e:
+                    raise e
 
     def scan_entities(self) -> List[Dict[str, Any]]:
         # 'mcrcon' uses .command(), 'rcon' uses .run()
@@ -124,6 +128,7 @@ class Rcon_reciever:
         self._send_command_with_retry(f"/moveto {x} {y}")
         return None
 
+    #TODO: FIX THIS SHIT
     def char_info(self) -> CharInfo:
         response = self._send_command_with_retry("/char_info")
         if not response or not response.strip():
@@ -181,6 +186,13 @@ class Rcon_reciever:
         self._send_command_with_retry("/resetsurface")
         time.sleep(1.0)
         self._send_command_with_retry("/reset")
+        time.sleep(1.0)
+        #starting times
+        #slightly more items then vanilla to account for jimbo's "inefficiencies" :3
+        self.give(21,5)
+        self.give(25,5)
+        self.give(46,50)
+        self.give(32,10)
 
 
     def scan_ore(self) -> List[Dict[str, Any]]:
@@ -198,11 +210,14 @@ if __name__ == "__main__":
     receiver =  Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
     try:
         receiver.connect()
+        #receiver.reset()
         entities = receiver.scan_entities()
         bbentities = receiver.scan_entities_boundingboxes()
         ores = receiver.scan_ore()
+        inventory = receiver.char_info()
         print(entities)
         print(bbentities)
         print(ores)
+        print(inventory)
     finally:
         receiver.disconnect()
