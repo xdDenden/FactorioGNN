@@ -220,7 +220,7 @@ local function scan_entities()
     return json.encode(entities_list)
 end
 
-local function scan_resources()
+local function scan_ore()
     local resources_list = {}
     local surface = game.surfaces[2]
 
@@ -228,7 +228,7 @@ local function scan_resources()
     local resources = surface.find_entities_filtered{
         position = {0, 0},
         type = "resource",
-        radius = 200
+        radius = 250
     }
 
     for _, resource in pairs(resources) do
@@ -370,6 +370,14 @@ end)
 
 commands.add_command("scan_research", "You get everything Researched | I get nothing", function(event)
     local json_str = scan_research()
+    if event.player_index == nil then
+        rcon.print(json_str)
+    else
+        game.players[event.player_index].print(json_str)
+    end
+end)
+commands.add_command("scan_ore", "Returns JSON list of ores", function(event)
+    local json_str = scan_ore()
     if event.player_index == nil then
         rcon.print(json_str)
     else

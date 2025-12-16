@@ -216,7 +216,7 @@ if __name__ == "__main__":
         inventory = receiver.char_info()
         print(entities)
         print(bbentities)
-        #print(ores)
+        print(ores)
         print(inventory)
     finally:
         receiver.disconnect()
