@@ -7,6 +7,9 @@ import numpy as np
 import random
 from collections import deque, defaultdict
 from tqdm import tqdm
+import os
+import traceback
+import json
 
 from OrePatchDetector import OrePatchDetector
 from config import Config
@@ -27,6 +30,7 @@ EPSILON_END = 0.05  # Minimum value of epsilon for epsilon-greedy policy
 EPSILON_DECAY = 850000  # Decay rate for epsilon over time
 TARGET_UPDATE = 200  # Frequency of target network updates (in gradient steps)
 NUM_EPISODES = 25  # Total number of episodes to train the model
+AUTOSAVE_PATH = "autosave.pth"
 
 
 class TimingTracker:
@@ -166,8 +170,36 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
             return act, item, rot, heatmap_idx, h_next
 
 
+def save_checkpoint(path, policy_net, target_net, optimizer, memory, env_steps_done, episode, updates_done):
+    """Saves the entire training state."""
+    print(f"\nSaving autosave to {path}...")
+    torch.save({
+        'policy_net': policy_net.state_dict(),
+        'target_net': target_net.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'memory': memory.buffer,  # Deque is picklable
+        'env_steps_done': env_steps_done,
+        'episode': episode,
+        'updates_done': updates_done
+    }, path)
+    print("Autosave complete.")
 
-def train():
+def load_checkpoint(path, policy_net, target_net, optimizer, memory):
+    """Loads the training state from a file."""
+    if not os.path.exists(path):
+        return 0, 0, 0 # start_episode, env_steps_done, updates_done
+
+    print(f"Loading checkpoint from {path}...")
+    checkpoint = torch.load(path)
+    policy_net.load_state_dict(checkpoint['policy_net'])
+    target_net.load_state_dict(checkpoint['target_net'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    memory.buffer = checkpoint['memory']
+
+    return checkpoint['episode'], checkpoint['env_steps_done'], checkpoint.get('updates_done', 0)
+
+
+def train(resume_path=None):
     cfg = Config()
     env = FactorioEnv(cfg)
     logger = TrainingLogger()
@@ -194,6 +226,18 @@ def train():
     # Counters
     env_steps_done = 0
     updates_done = 0
+    start_episode = 0
+
+    # Resume if requested
+    if resume_path:
+        start_episode, env_steps_done, updates_done = load_checkpoint(
+            resume_path, policy_net, target_net, optimizer, memory
+        )
+        # Check if we are already done
+        if start_episode >= NUM_EPISODES:
+            print("Training already completed in this checkpoint.")
+            return
+
     steps_since_train = 0
 
     # Timing
@@ -201,7 +245,7 @@ def train():
     steps_since_report = 0
 
     # === OUTER PROGRESS BAR (Episodes) ===
-    outer_bar = tqdm(range(NUM_EPISODES), desc="Total Progress", unit="ep")
+    outer_bar = tqdm(range(start_episode, NUM_EPISODES), desc="Total Progress", unit="ep", initial=start_episode, total=NUM_EPISODES)
 
     for episode in outer_bar:
 
@@ -209,28 +253,33 @@ def train():
         # save it to a file for use in ActionMasking
         # only need to do this once per episode because thats when the map resets
         # also time between episodes is long enough to not worry about timing this or it slowing down training
-        receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
-        ore_map = receiver_ore.scan_ore()
+        try:
+            receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
+            ore_map = receiver_ore.scan_ore()
 
-        # Save as JSON instead of string representation
-        import json
-        with open("ore_map.json", "w") as ore_file:
-            json.dump(ore_map, ore_file)
-        receiver_ore.disconnect()
+            # Save as JSON instead of string representation
+            with open("ore_map.json", "w") as ore_file:
+                json.dump(ore_map, ore_file)
+            receiver_ore.disconnect()
 
-        # Then process the ores map for use in ActionMasking
-        # The ores will be converted from millions of individual nodes into a smaller number of patches
-        # this is necessary for performance reasons
-        with open("ore_map.json", "r") as f:
-            ore_data = json.load(f)  # This loads it as a proper list of dicts
+            # Then process the ores map for use in ActionMasking
+            # The ores will be converted from millions of individual nodes into a smaller number of patches
+            # this is necessary for performance reasons
+            with open("ore_map.json", "r") as f:
+                ore_data = json.load(f)  # This loads it as a proper list of dicts
 
-        detector = OrePatchDetector(ore_data)
-        patches = detector.process_patches()
+            detector = OrePatchDetector(ore_data)
+            patches = detector.process_patches()
 
-        with open("patches.json", "w") as patches_file:
-            # Save patches too (without the polygon objects though)
-            patches_serializable = [{k: v for k, v in p.items() if k != 'polygon'} for p in patches]
-            json.dump(patches_serializable, patches_file)
+            with open("patches.json", "w") as patches_file:
+                # Save patches too (without the polygon objects though)
+                patches_serializable = [{k: v for k, v in p.items() if k != 'polygon'} for p in patches]
+                json.dump(patches_serializable, patches_file)
+        except Exception as e:
+            print(f"Error during Ore Scanning/Processing: {e}")
+            # Depending on severity, you might want to continue or crash.
+            # We'll let it crash so the retry logic handles it if RCON fails temporarily.
+            raise e
 
         #again we will save the patches to a file for use in ActionMasking
 
@@ -455,6 +504,19 @@ def train():
         avg_ep_time = np.mean(step_times) if step_times else 0
         outer_bar.set_postfix(LastRew=f"{total_reward:.1f}", AvgTime=f"{avg_ep_time:.3f}s")
 
+        # === AUTOSAVE ===
+        # Save after every episode, noting that we have finished 'episode' (so next start is episode + 1)
+        save_checkpoint(
+            AUTOSAVE_PATH,
+            policy_net,
+            target_net,
+            optimizer,
+            memory,
+            env_steps_done,
+            episode + 1,
+            updates_done
+        )
+
     # Final timing report
     if steps_since_report > 0:
         timer.print_report(steps_since_report)
@@ -465,4 +527,43 @@ def train():
 
 
 if __name__ == "__main__":
-    train()
+    MAX_RETRIES = 3
+    RETRY_DELAY = 30
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            # If attempt > 0, we must try to resume.
+            # If attempt == 0, we check if we should resume or start fresh.
+            # Assuming if an autosave exists, we prefer it for crash resilience,
+            # OR we can assume first run is fresh unless specified.
+            # Given the request is "if it crashes... retry to continue from that autosave",
+            # we will enable resume if attempt > 0.
+
+            should_resume = (attempt > 0) and os.path.exists(AUTOSAVE_PATH)
+
+            if attempt > 0:
+                print(f"\n=== ATTEMPT {attempt}/{MAX_RETRIES} (Resuming from autosave) ===")
+            else:
+                print(f"\n=== ATTEMPT {attempt}/{MAX_RETRIES} ===")
+                # Optional: You could delete AUTOSAVE_PATH here if you wanted a strictly fresh start
+                # unless you want to support manual resuming from a previous run.
+
+            train(resume_path=AUTOSAVE_PATH if should_resume else None)
+
+            # If train completes successfully, break the retry loop
+            print("Training finished successfully.")
+            break
+
+        except KeyboardInterrupt:
+            print("\nStopped by user.")
+            break
+        except Exception as e:
+            print(f"\nCRASH DETECTED on attempt {attempt}: {e}")
+            traceback.print_exc()
+
+            if attempt < MAX_RETRIES:
+                print(f"Waiting {RETRY_DELAY} seconds before retrying...")
+                time.sleep(RETRY_DELAY)
+            else:
+                print("Max retries reached. Exiting with error.")
+                raise e
