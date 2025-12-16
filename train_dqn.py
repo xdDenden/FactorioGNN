@@ -1,5 +1,4 @@
 import time
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -302,7 +301,6 @@ def train(resume_path=None):
         last_epsilon = EPSILON_START
         # === INNER PROGRESS BAR (Steps within Episode) ===
         with tqdm(range(cfg.MAX_TIMESTEPS), desc=f"Ep {episode + 1}", leave=False) as inner_bar:
-            time.sleep(10.0)
             for t in inner_bar:
                 step_start_time = timeit.default_timer()
 
