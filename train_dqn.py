@@ -24,9 +24,9 @@ BATCH_SIZE = 32  # Number of samples per training batch
 BUFFER_SIZE = 50000  # Maximum size of the replay buffer
 EPSILON_START = 1.0  # Initial value of epsilon for epsilon-greedy policy
 EPSILON_END = 0.05  # Minimum value of epsilon for epsilon-greedy policy
-EPSILON_DECAY = 25000  # Decay rate for epsilon over time
+EPSILON_DECAY = 850000  # Decay rate for epsilon over time
 TARGET_UPDATE = 200  # Frequency of target network updates (in gradient steps)
-NUM_EPISODES = 50  # Total number of episodes to train the model
+NUM_EPISODES = 25  # Total number of episodes to train the model
 
 
 class TimingTracker:
