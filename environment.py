@@ -42,6 +42,13 @@ class FactorioEnv:
         self.patch_nodes = []
         self.steps_without_action = 0
 
+        # --- ADD THIS: Movement State Tracking ---
+        self.move_state = {
+            'active': False,
+            'target': (0.0, 0.0),
+            'timer': 0
+        }
+
     def reset(self):
         self.milestones.clear()
         self.max_edges_seen = 0
@@ -49,6 +56,9 @@ class FactorioEnv:
         self.successful_crafts = 0
         self.steps_without_action = 0
         self.patch_nodes = []
+
+        # --- ADD THIS: Reset State ---
+        self.move_state = {'active': False, 'target': (0.0, 0.0), 'timer': 0}
 
         try:
             self.receiver.connect()
@@ -144,12 +154,48 @@ class FactorioEnv:
         final_x = unnormalize_coord(x_norm, min_x, max_x)
         final_y = unnormalize_coord(y_norm, min_y, max_y)
 
-        # Execute
-        log_msg = translateGNNtoFactorio(
-            final_x, final_y, action_idx, item_idx, rotation_idx, self.receiver, verbose=self.cfg.VERBOSE
-        )
+        # --- MODIFIED: Smart Move Handling ---
+        should_send_rcon = True
+        log_msg = "Action skipped (Continuing Move)"
+
+        if action_idx == 0:  # Action: MOVE_TO
+            if self.move_state['active']:
+                # FALLBACK CASE:
+                # If we are already moving but select Move again (likely due to
+                # all masks being 0), treat it as "WAIT".
+                # Do NOT send RCON (prevents stutter/spam)
+                # Do NOT reset timer (prevents infinite loop)
+                should_send_rcon = False
+            else:
+                # Genuine NEW move command
+                self.move_state['active'] = True
+                self.move_state['target'] = (final_x, final_y)
+                self.move_state['timer'] = 0
+                should_send_rcon = True
+
+        # Execute RCON only if necessary
+        if should_send_rcon:
+            log_msg = translateGNNtoFactorio(
+                final_x, final_y, action_idx, item_idx, rotation_idx, self.receiver, verbose=self.cfg.VERBOSE
+            )
 
         next_obs = self.get_observation()
+
+        # --- Update Movement Timer (Runs every step) ---
+        if self.move_state['active']:
+            self.move_state['timer'] += 1
+
+            # Check Arrival
+            px = self._last_raw_player.get('pos', {}).get('x', 0)
+            py = self._last_raw_player.get('pos', {}).get('y', 0)
+            tx, ty = self.move_state['target']
+            dist = math.sqrt((px - tx)**2 + (py - ty)**2)
+
+            if dist < 2.0 or self.move_state['timer'] >= 50:
+                self.move_state['active'] = False
+                # Optionally stop the character in game if they timed out?
+                # self.receiver.send_command("/c game.player.walking_state = {walking=false}")
+
         reward, done = self._compute_reward(log_msg, action_idx)
 
         return next_obs, reward, done, {}
@@ -158,17 +204,22 @@ class FactorioEnv:
         reward = 0.0
         done = False
 
-        # --- A. Validation & Punishment (Point 2) ---
-        # Explicit check for success (assuming translateGNNtoFactorio or environment catches strings)
+        # --- A. Validation & Punishment ---
         if "FAILED" in log_msg or "Cannot" in log_msg:
             reward -= 0.2
         elif action_idx == 0:
-            self.steps_without_action += 1
-            if self.steps_without_action > 5:
-                reward -= 0.5
+            # CHECK: Are we "Productively Waiting" (Moving) or "Lazily Waiting"?
+            if self.move_state['active']:
+                # We are traveling. Reset the idle counter.
+                self.steps_without_action = 0
+            else:
+                # We are truly doing nothing.
+                self.steps_without_action += 1
+                if self.steps_without_action > 5:
+                    reward -= 0.5
         else:
-            #self.steps_without_action = 0
-            #reward += 0.05
+            # Any other action resets the idle counter
+            self.steps_without_action = 0
 
 
             # --- Successful Craft Reward ---

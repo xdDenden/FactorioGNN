@@ -6,7 +6,7 @@ from shapely.geometry import Polygon
 from OrePatchDetector import OrePatchDetector
 
 # Import your existing mappings
-from mappings import ID_TO_ACTION, ID_TO_ITEM, ITEM_MAP, ACTION_MAP, MACHINE_NAME_MAP
+from mappings import ID_TO_ACTION, ID_TO_ITEM, ITEM_MAP, ACTION_MAP, MACHINE_NAME_MAP, INSERT_MAP
 
 # ==========================================
 #          Directly Usable Recipes
@@ -121,7 +121,7 @@ def world_to_grid(x: float, y: float, bounds: Tuple[int, int, int, int], grid_st
     return grid_x, grid_y
 
 
-def check_reach(p_x, p_y, t_x, t_y, max_dist=50.0):
+def check_reach(p_x, p_y, t_x, t_y, max_dist=75.0):
     """Checks if target (t_x, t_y) is within reach of player (p_x, p_y)."""
     return math.sqrt((p_x - t_x) ** 2 + (p_y - t_y) ** 2) <= max_dist
 
@@ -137,7 +137,8 @@ def get_action_masks(
         science_level: int,
         bounds: Tuple[int, int, int, int],
         grid_steps: int = 17,
-        patches: Optional[List[Dict]] = None
+        patches: Optional[List[Dict]] = None,
+        move_state: Optional[Dict] = None
 ):
     """
     Generates bitmasks to filter illegal actions.
@@ -171,13 +172,21 @@ def get_action_masks(
     py = player_info.get('pos', {}).get('y', 0)
 
     # --- Pre-calculate Spatial State ---
-    # We create a grid representation of where entities ARE and ARE NOT.
+    # 1. Occupied Grid (For Build)
     entity_grid = np.zeros((grid_steps, grid_steps), dtype=bool)
+
+    # 2. Insertable Grid (For Insert/Take)
+    insertable_grid = np.zeros((grid_steps, grid_steps), dtype=bool)
 
     # Map entities to grid
     for e in entities:
         gx, gy = world_to_grid(e['x'], e['y'], bounds, grid_steps)
         entity_grid[gy, gx] = True  # Mark occupied
+
+# Check if entity is in INSERT_MAP (using machine_name or name)
+        name = e.get('machine_name', e.get('name', ''))
+        if name in INSERT_MAP:
+            insertable_grid[gy, gx] = True
 
     # Flatten grid for the mask (Row-major order to match rconToGNN decoding)
     # Note: rconToGNN uses: y_grid_idx = flat // 17, x = flat % 17
@@ -188,6 +197,7 @@ def get_action_masks(
     min_x, max_x, min_y, max_y = bounds
     step_x = (max_x - min_x) / grid_steps
     step_y = (max_y - min_y) / grid_steps
+    flat_insertable_mask = insertable_grid.flatten()
 
     # --- Load Patches (if not provided) ---
     loaded_patches = []
@@ -224,7 +234,7 @@ def get_action_masks(
             # Approx world pos of this grid cell
             wx = min_x + (gx * step_x)
             wy = min_y + (gy * step_y)
-            if check_reach(px, py, wx, wy, max_dist=10): # Standard reach
+            if check_reach(px, py, wx, wy, max_dist=75):
                 reach_grid[gy, gx] = True
 
     flat_reach_mask = reach_grid.flatten()
@@ -240,9 +250,13 @@ def get_action_masks(
     # 0. ACTION: MOVE_TO (0)
     # ==========================================
     # Always legal to try moving (pathfinding handles the rest)
-    action_mask[0] = 1.0
-    item_mask[0, :] = 0.0  # Clear all
-    item_mask[0, 0] = 1.0  # CHANGE 2: Only allow 'None' (ID 0) for movement
+    if move_state and move_state['active']:
+        action_mask[0] = 0.0
+    else:
+        action_mask[0] = 1.0
+
+    item_mask[0, :] = 0.0
+    item_mask[0, 0] = 1.0
     spatial_mask[0, :] = 1.0
 
     # ==========================================
@@ -259,7 +273,7 @@ def get_action_masks(
             wy = min_y + (gy * step_y) + (step_y / 2)
 
             # 2. Check Reach
-            if not check_reach(px, py, wx, wy, max_dist=10):
+            if not check_reach(px, py, wx, wy, max_dist=75):
                 continue
 
             # 3. Check for valid Ore Patch (excluding crude-oil)
@@ -288,6 +302,7 @@ def get_action_masks(
     # 2. ACTION: CRAFT (2)
     # ==========================================
     # Legal IF: Player has ingredients for at least one recipe
+    # TODO: Consider which buildings can be placed on which surface (mining drills need ore etc)
     can_craft_any = False
 
     for item_name, recipe_data in RECIPES.items():
@@ -323,24 +338,38 @@ def get_action_masks(
                 item_mask[3, item_id] = 1.0
                 can_build_any = True
 
+
     # 2. Check Spatial (Empty + Reach)
     valid_build_locs = flat_empty_mask & flat_reach_mask
+
+    # DEBUG: Check why it fails
+    #if can_build_any and not np.any(valid_build_locs):
+        #print(f"[Masking Debug] Build blocked by spatial mask!")
+        #print(f"  Player Pos: {px}, {py}")
+        #print(f"  Bounds: {min_x}, {max_x}, {min_y}, {max_y}")
+        #print(f"  Reach Grid True Count: {np.sum(reach_grid)}")
+        #print(f"  Empty Grid True Count: {np.sum(flat_empty_mask)}")
 
     if can_build_any and np.any(valid_build_locs):
         action_mask[3] = 1.0
         spatial_mask[3, :] = valid_build_locs.astype(np.float32)
+        #print(f"[Masking Debug] Build blocked by spatial mask!")
+        #print(f"  Player Pos: {px}, {py}")
+        #print(f"  Bounds: {min_x}, {max_x}, {min_y}, {max_y}")
+        #print(f"  Reach Grid True Count: {np.sum(reach_grid)}")
+        #print(f"  Empty Grid True Count: {np.sum(flat_empty_mask)}")
 
     # ==========================================
     # 4. ACTION: INSERT_INTO (4)
     # ==========================================
-    # Legal IF: Entity at target (to insert into) + Item in hand
-    # We allow inserting any item for now, or you can filter by inventory
+    # Legal IF: Entity is in INSERT_MAP + Reachable
     has_items = sum(inventory.values()) > 0
-    valid_targets = flat_entity_mask & flat_reach_mask  # Must insert INTO something
+    valid_insert_targets = flat_insertable_mask & flat_reach_mask
 
-    if has_items and np.any(valid_targets):
+
+    if has_items and np.any(valid_insert_targets):
         action_mask[4] = 1.0
-        spatial_mask[4, :] = valid_targets.astype(np.float32)
+        spatial_mask[4, :] = valid_insert_targets.astype(np.float32)
         # Enable all items in inventory
         for item_name, count in inventory.items():
             if count > 0:
@@ -351,18 +380,18 @@ def get_action_masks(
     # 5. ACTION: TAKE (5)
     # ==========================================
     # Legal IF: Entity at target (to take from)
-    if np.any(valid_targets):
+    if np.any(valid_insert_targets):
         action_mask[5] = 1.0
-        spatial_mask[5, :] = valid_targets.astype(np.float32)
-    item_mask[5, :] = 1.0  # Item arg irrelevant
+        spatial_mask[5, :] = valid_insert_targets.astype(np.float32)
+        item_mask[5, :] = 1.0  # Item arg irrelevant
 
     # ==========================================
     # 6. ACTION: CHANGE_RECIPE (6)
     # ==========================================
     # Legal IF: Entity at target
-    if np.any(valid_targets):
+    if np.any(valid_insert_targets):
         action_mask[6] = 1.0
-        spatial_mask[6, :] = valid_targets.astype(np.float32)
+        spatial_mask[6, :] = valid_insert_targets.astype(np.float32)
         # Enable all valid recipes
         # For simplicity, we enable all items that act as recipe outputs
         for name, _ in RECIPES.items():

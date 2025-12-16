@@ -518,7 +518,9 @@ commands.add_command("char_info", "", function(event)
 
   if #ai_characters == 0 then
     -- Return an empty/error object as JSON
-    return json.encode({status = "FAILED", message = "No AI Character found."})
+    local error_response = json.encode({status = "FAILED", message = "No AI Character found."})
+    rcon.print(error_response)
+    return
   end
 
   local character = ai_characters[1]
@@ -527,14 +529,12 @@ commands.add_command("char_info", "", function(event)
 
   -- Data container to return
   local result = {
-    status = "SUCCESS",
     pos = {x = pos.x, y = pos.y},
     inventory = {}
   }
 
   if inventory and not inventory.is_empty() then
     local slot_count = #inventory
-    local item_counts = {}
 
     for i = 1, slot_count do
       local stack = inventory[i]
@@ -548,7 +548,9 @@ commands.add_command("char_info", "", function(event)
     end
   end
 
-  return json.encode(result)
+  -- Encode to JSON string and print via rcon
+  local json_result = helpers.table_to_json(result)
+  rcon.print(json_result)
 end)
 
 --Insert items from the character into a machine
@@ -611,7 +613,10 @@ commands.add_command("insert_into", "AI Character inserts items into machine: /i
     end
 
     local machine = entities[1]
-
+    if machine.name == "character" then
+        game.print("Cannot insert into character!")
+        return
+    end
     -- Prüfe ob die Entity ein Inventar hat
     if not machine.get_inventory(defines.inventory.furnace_source) and
        not machine.get_inventory(defines.inventory.assembling_machine_input) and
@@ -657,10 +662,9 @@ end)
 --change recipe of a machine
 --/c_recipe x y <itemindex(1-52)>
 commands.add_command("c_recipe", "Set recipe in machine: /c_recipe <x> <y> <recipe_id>", function(event)
-    --local player = game.players[event.player_index]
     local surface = game.surfaces[2]
 
-    -- Parse Parameter
+    -- Parse Parameters
     local params = {}
     for param in string.gmatch(event.parameter or "", "%S+") do
         table.insert(params, param)
@@ -670,7 +674,12 @@ commands.add_command("c_recipe", "Set recipe in machine: /c_recipe <x> <y> <reci
     local y = tonumber(params[2])
     local recipe_id = tonumber(params[3])
 
-    -- Prüfe ob Recipe ID excluded ist
+    if not x or not y or not recipe_id then
+        game.print("Invalid syntax. Use: /c_recipe <x> <y> <recipe_id>")
+        return
+    end
+
+    -- Check excluded/invalid recipes
     if recipe_exclude[recipe_id] then
         game.print("Item ID " .. recipe_id .. " is not a recipe!")
         return
@@ -682,36 +691,31 @@ commands.add_command("c_recipe", "Set recipe in machine: /c_recipe <x> <y> <reci
         return
     end
 
-    --find machine
+    -- 1. Use the filter to Find ONLY Assembling Machines
+    -- This prevents picking up belts, inserters, or items on the ground
     local entities = surface.find_entities_filtered{
         position = {x, y},
-        radius = 0.5
+        radius = 0.5,
+        type = "assembling-machine"
     }
 
     if #entities == 0 then
-        game.print("No Machine at (" .. x .. ", " .. y .. ") found!")
+        game.print("No Assembling Machine found at (" .. x .. ", " .. y .. ")")
         return
     end
 
     local machine = entities[1]
 
-    -- Prüfe ob die Maschine Rezepte unterstützt
-    if machine.type ~= "assembling-machine" and
-       machine.type ~= "furnace" then
-        game.print(machine.name .. " Does not support Recipes")
-        return
-    end
+    -- 2. Set the recipe using the Property, not the Function
+    -- This is the API-safe way to do it. It won't crash C++.
+    machine.recipe = recipe_name
 
-    -- Setze das Rezept
-    if machine.set_recipe then
-        local success = machine.set_recipe(recipe_name)
-        if success then
-            game.print("Recipe " .. recipe_name .. " set in " .. machine.name .. " at (" .. x .. ", " .. y .. ")")
-        else
-            game.print("Recipe not comp with Machine")
-        end
+    -- 3. Verify it worked
+    -- machine.recipe returns the LuaRecipe object if successful, or nil if failed
+    if machine.recipe and machine.recipe.name == recipe_name then
+        game.print("Recipe " .. recipe_name .. " set in " .. machine.name .. " at (" .. x .. ", " .. y .. ")")
     else
-        game.print("Recipe not comp with Machine")
+        game.print("Recipe '" .. recipe_name .. "' is incompatible with " .. machine.name)
     end
 end)
 
@@ -750,7 +754,10 @@ commands.add_command("take", "Take items from machine: /take <x> <y>", function(
     end
 
     local machine = entities[1]
-
+    if machine.name == "character" then
+        game.print("Cannot take items from character!")
+        return
+    end
     -- Liste aller möglichen Inventar-Typen
     local inventory_types = {
         defines.inventory.chest,
@@ -798,7 +805,6 @@ end)
 
 commands.add_command("reset", "", function(event)
     local surface = game.surfaces[2]
-    --game.delete_surface("Penis1")
     local nauvis_settings = game.surfaces["nauvis"].map_gen_settings
 
     -- Ändere den Seed in den Settings

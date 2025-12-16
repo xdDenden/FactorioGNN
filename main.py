@@ -71,7 +71,8 @@ def main():
                 player_info=raw_player,
                 inventory=inventory,
                 science_level=1,
-                bounds=bounds
+                bounds=bounds,
+                move_state=env.move_state
             )
 
             # B. Model Inference

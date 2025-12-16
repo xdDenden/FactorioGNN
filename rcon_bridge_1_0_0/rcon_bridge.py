@@ -128,7 +128,6 @@ class Rcon_reciever:
         self._send_command_with_retry(f"/moveto {x} {y}")
         return None
 
-    #TODO: FIX THIS SHIT
     def char_info(self) -> CharInfo:
         response = self._send_command_with_retry("/char_info")
         if not response or not response.strip():
@@ -217,7 +216,7 @@ if __name__ == "__main__":
         inventory = receiver.char_info()
         print(entities)
         print(bbentities)
-        print(ores)
+        #print(ores)
         print(inventory)
     finally:
         receiver.disconnect()

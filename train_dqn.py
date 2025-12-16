@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -251,7 +253,7 @@ def train():
         last_epsilon = EPSILON_START
         # === INNER PROGRESS BAR (Steps within Episode) ===
         with tqdm(range(cfg.MAX_TIMESTEPS), desc=f"Ep {episode + 1}", leave=False) as inner_bar:
-
+            time.sleep(10.0)
             for t in inner_bar:
                 step_start_time = timeit.default_timer()
 
@@ -286,7 +288,8 @@ def train():
                     inventory=inventory,
                     science_level=1, # Placeholder
                     bounds=bounds,
-                    patches = patches
+                    patches = patches,
+                    move_state = env.move_state
                 )
                 timer.record('mask_calc', timeit.default_timer() - t_start)
 
@@ -294,11 +297,12 @@ def train():
                 if t % 100 == 0:
                     act_mask, item_mask, space_mask = masks
                     print(f"\n[DEBUG Step {t}] Action Mask: {act_mask}")
-                    print(f"Inventory: {inventory}")
-                    if act_mask[2] == 1.0:
-                        print("Crafting is VALID.")
-                    else:
-                        print("Crafting is BLOCKED.")
+                    #print(f"Inventory: {inventory}")
+                    #DEBUG CRAFTING CHECK
+                   # if act_mask[2] == 1.0:
+                        #print("Crafting is VALID.")
+                    #else:
+                        #print("Crafting is BLOCKED.")
 
                 # --- Time: Action Selection ---
                 t_start = timeit.default_timer()

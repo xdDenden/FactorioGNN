@@ -170,6 +170,20 @@ ITEM_MAP: Dict[str, int] = {
     "pump":52
 
 }
+
+INSERT_MAP: Dict[str, int] = {
+    "wooden-chest": 0,
+    "burner-inserter": 1,
+    "boiler": 2,
+    "burner-mining-drill": 3,
+    "stone-furnace": 4,
+    "steel-furnace": 5,
+    "assembling-machine-1": 6,
+    "assembling-machine-2": 7,
+    "oil-refinery": 8,
+    "chemical-plant": 9,
+    "lab": 10,
+}
 ACTION_MAP = {
     #"none": 0,
     "moveto": 0,
