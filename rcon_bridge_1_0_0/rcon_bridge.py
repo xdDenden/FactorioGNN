@@ -188,7 +188,7 @@ class Rcon_reciever:
         time.sleep(1.0)
         #starting times
         #slightly more items then vanilla to account for jimbo's "inefficiencies" :3
-        self.give(21,5)
+        self.give(21,10)
         self.give(25,5)
         self.give(46,50)
         self.give(32,10)
@@ -212,11 +212,11 @@ if __name__ == "__main__":
         #receiver.reset()
         entities = receiver.scan_entities()
         bbentities = receiver.scan_entities_boundingboxes()
-        ores = receiver.scan_ore()
+        #ores = receiver.scan_ore()
         inventory = receiver.char_info()
         print(entities)
         print(bbentities)
-        print(ores)
+        #print(ores)
         print(inventory)
     finally:
         receiver.disconnect()

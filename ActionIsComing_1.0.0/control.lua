@@ -821,6 +821,9 @@ commands.add_command("reset", "", function(event)
     ---- Erstelle die neue Surface mit den modifizierten Nauvis-Settings
     --local surface = game.create_surface("Test Surface", nauvis_settings)
 
+    surface.request_to_generate_chunks({0, 0}, 4)
+    surface.force_generate_chunk_requests()
+
     local types = {
         "assembling-machine",
         "furnace",

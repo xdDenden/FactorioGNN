@@ -55,20 +55,21 @@ RECIPES = {
 
     # Production Buildings
     "assembling-machine-1": {"electronic-circuit": 3, "iron-gear-wheel": 5, "iron-plate": 9},
-    "assembling-machine-2": {"iron-gear-wheel": 5, "electronic-circuit": 3, "steel-plate": 2,"assembling-machine-1": 1},
+    "assembling-machine-2": {"iron-gear-wheel": 5, "electronic-circuit": 3, "steel-plate": 2,
+                             "assembling-machine-1": 1},
     "oil-refinery": {"electronic-circuit": 10, "iron-gear-wheel": 10, "steel-plate": 15, "pipe": 10, "stone-brick": 10},
     "chemical-plant": {"electronic-circuit": 5, "iron-gear-wheel": 5, "steel-plate": 5, "pipe": 5},
     "lab": {"electronic-circuit": 10, "iron-gear-wheel": 10, "transport-belt": 4},
 
     # Smelting Recipes (These are crafted IN furnaces, not crafted as items)
-    #"iron-plate": {"iron-ore": 1},
-    #"copper-plate": {"copper-ore": 1},
-    #"steel-plate": {"iron-plate": 5},
+    # "iron-plate": {"iron-ore": 1},
+    # "copper-plate": {"copper-ore": 1},
+    # "steel-plate": {"iron-plate": 5},
 
     # Oil Processing also not directly crafted
-    #"basic-oil-processing": {"crude-oil": 100},  # Produces: petroleum-gas: 45
-    #"plastic-bar": {"coal": 1, "petroleum-gas": 20},
-    #"sulfur": {"water": 30, "petroleum-gas": 30},
+    # "basic-oil-processing": {"crude-oil": 100},  # Produces: petroleum-gas: 45
+    # "plastic-bar": {"coal": 1, "petroleum-gas": 20},
+    # "sulfur": {"water": 30, "petroleum-gas": 30},
 
     # Intermediate Products
     "iron-gear-wheel": {"iron-plate": 2},
@@ -83,6 +84,9 @@ RECIPES = {
     "logistic-science-pack": {"transport-belt": 1, "inserter": 1},
     "chemical-science-pack": {"advanced-circuit": 3, "engine-unit": 2, "sulfur": 1},
 }
+
+# Define which items are mining drills
+MINING_DRILLS = {"burner-mining-drill", "electric-mining-drill"}
 
 
 # ==========================================
@@ -124,6 +128,26 @@ def world_to_grid(x: float, y: float, bounds: Tuple[int, int, int, int], grid_st
 def check_reach(p_x, p_y, t_x, t_y, max_dist=75.0):
     """Checks if target (t_x, t_y) is within reach of player (p_x, p_y)."""
     return math.sqrt((p_x - t_x) ** 2 + (p_y - t_y) ** 2) <= max_dist
+
+
+def is_player_near_ore_patch_center(px, py, patches, distance_threshold=7.0):
+    """
+    Check if player is within distance_threshold tiles of any ore patch center.
+
+    Args:
+        px, py: Player position
+        patches: List of ore patches with 'center' key
+        distance_threshold: Maximum distance to patch center (default 6-7 tiles)
+
+    Returns:
+        bool: True if player is near any ore patch center
+    """
+    for patch in patches:
+        center_x, center_y = patch['center']
+        distance = math.sqrt((px - center_x) ** 2 + (py - center_y) ** 2)
+        if distance <= distance_threshold:
+            return True
+    return False
 
 
 # ==========================================
@@ -183,7 +207,7 @@ def get_action_masks(
         gx, gy = world_to_grid(e['x'], e['y'], bounds, grid_steps)
         entity_grid[gy, gx] = True  # Mark occupied
 
-# Check if entity is in INSERT_MAP (using machine_name or name)
+        # Check if entity is in INSERT_MAP (using machine_name or name)
         name = e.get('machine_name', e.get('name', ''))
         if name in INSERT_MAP:
             insertable_grid[gy, gx] = True
@@ -221,7 +245,6 @@ def get_action_masks(
     # Detector instance
     detector = OrePatchDetector(ore_data=[])
 
-
     # --- Pre-calculate Reach Mask ---
     # Which grid cells are reachable?
     reach_grid = np.zeros((grid_steps, grid_steps), dtype=bool)
@@ -242,9 +265,9 @@ def get_action_masks(
     # ==========================================
     # 0. ACTION: NONE (0)
     # ==========================================
-    #action_mask[0] = 1.0  # Always legal to do nothing
-    #item_mask[0, :] = 1.0  # Args irrelevant
-    #spatial_mask[0, :] = 1.0
+    # action_mask[0] = 1.0  # Always legal to do nothing
+    # item_mask[0, :] = 1.0  # Args irrelevant
+    # spatial_mask[0, :] = 1.0
 
     # ==========================================
     # 0. ACTION: MOVE_TO (0)
@@ -327,7 +350,11 @@ def get_action_masks(
     # 3. ACTION: BUILD (3)
     # ==========================================
     # Legal IF: Player has the item AND target is empty AND within reach
+    # SPECIAL CASE: Mining drills require player near ore patch center AND build location in ore patch
     can_build_any = False
+
+    # Check if player is near any ore patch center (for miner placement eligibility)
+    player_near_ore_center = is_player_near_ore_patch_center(px, py, loaded_patches, distance_threshold=7.0)
 
     # 1. Check Inventory for buildable items
     for item_name, count in inventory.items():
@@ -335,29 +362,75 @@ def get_action_masks(
             item_id = MACHINE_NAME_MAP.get(item_name, 0)
             # Simple check: is it in our ID map? (Assumes map implies buildable)
             if item_id > 0:
-                item_mask[3, item_id] = 1.0
-                can_build_any = True
-
+                # Special handling for mining drills
+                if item_name in MINING_DRILLS:
+                    # Only enable miner in item mask if player is near ore patch center
+                    if player_near_ore_center:
+                        item_mask[3, item_id] = 1.0
+                        can_build_any = True
+                else:
+                    # Regular buildings can always be placed (subject to spatial constraints)
+                    item_mask[3, item_id] = 1.0
+                    can_build_any = True
 
     # 2. Check Spatial (Empty + Reach)
+    # For mining drills: Also check if location is within an ore patch
     valid_build_locs = flat_empty_mask & flat_reach_mask
 
-    # DEBUG: Check why it fails
-    #if can_build_any and not np.any(valid_build_locs):
-        #print(f"[Masking Debug] Build blocked by spatial mask!")
-        #print(f"  Player Pos: {px}, {py}")
-        #print(f"  Bounds: {min_x}, {max_x}, {min_y}, {max_y}")
-        #print(f"  Reach Grid True Count: {np.sum(reach_grid)}")
-        #print(f"  Empty Grid True Count: {np.sum(flat_empty_mask)}")
+    # Create separate spatial masks for miners vs regular buildings
+    miner_spatial_mask = np.zeros(grid_size, dtype=bool)
+    regular_spatial_mask = valid_build_locs.copy()
 
-    if can_build_any and np.any(valid_build_locs):
+    if player_near_ore_center:
+        # Calculate valid miner locations (must be in ore patch)
+        for gy in range(grid_steps):
+            for gx in range(grid_steps):
+                flat_idx = gy * grid_steps + gx
+
+                # Must be empty and reachable
+                if not valid_build_locs[flat_idx]:
+                    continue
+
+                # Calculate world position
+                wx = min_x + (gx * step_x) + (step_x / 2)
+                wy = min_y + (gy * step_y) + (step_y / 2)
+
+                # Check if position is in any ore patch
+                if loaded_patches:
+                    patches_at_pos = detector.is_position_in_patch(wx, wy, patches=loaded_patches)
+                    if patches_at_pos:
+                        miner_spatial_mask[flat_idx] = True
+
+    # Check which buildable items the player has
+    has_miner = any(item_name in MINING_DRILLS and inventory.get(item_name, 0) > 0 for item_name in MINING_DRILLS)
+    has_regular_building = any(
+        inventory.get(item_name, 0) > 0 and MACHINE_NAME_MAP.get(item_name, 0) > 0 and item_name not in MINING_DRILLS
+        for item_name in inventory.keys()
+    )
+
+    # Combine spatial masks: allow miner locations OR regular building locations
+    combined_spatial_mask = np.zeros(grid_size, dtype=bool)
+    if has_miner and player_near_ore_center:
+        combined_spatial_mask |= miner_spatial_mask
+    if has_regular_building:
+        combined_spatial_mask |= regular_spatial_mask
+
+    # DEBUG: Check why it fails
+    # if can_build_any and not np.any(valid_build_locs):
+    # print(f"[Masking Debug] Build blocked by spatial mask!")
+    # print(f"  Player Pos: {px}, {py}")
+    # print(f"  Bounds: {min_x}, {max_x}, {min_y}, {max_y}")
+    # print(f"  Reach Grid True Count: {np.sum(reach_grid)}")
+    # print(f"  Empty Grid True Count: {np.sum(flat_empty_mask)}")
+
+    if can_build_any and np.any(combined_spatial_mask):
         action_mask[3] = 1.0
-        spatial_mask[3, :] = valid_build_locs.astype(np.float32)
-        #print(f"[Masking Debug] Build blocked by spatial mask!")
-        #print(f"  Player Pos: {px}, {py}")
-        #print(f"  Bounds: {min_x}, {max_x}, {min_y}, {max_y}")
-        #print(f"  Reach Grid True Count: {np.sum(reach_grid)}")
-        #print(f"  Empty Grid True Count: {np.sum(flat_empty_mask)}")
+        spatial_mask[3, :] = combined_spatial_mask.astype(np.float32)
+        # print(f"[Masking Debug] Build blocked by spatial mask!")
+        # print(f"  Player Pos: {px}, {py}")
+        # print(f"  Bounds: {min_x}, {max_x}, {min_y}, {max_y}")
+        # print(f"  Reach Grid True Count: {np.sum(reach_grid)}")
+        # print(f"  Empty Grid True Count: {np.sum(flat_empty_mask)}")
 
     # ==========================================
     # 4. ACTION: INSERT_INTO (4)
@@ -365,7 +438,6 @@ def get_action_masks(
     # Legal IF: Entity is in INSERT_MAP + Reachable
     has_items = sum(inventory.values()) > 0
     valid_insert_targets = flat_insertable_mask & flat_reach_mask
-
 
     if has_items and np.any(valid_insert_targets):
         action_mask[4] = 1.0
