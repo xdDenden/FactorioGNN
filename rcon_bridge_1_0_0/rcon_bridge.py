@@ -182,8 +182,8 @@ class Rcon_reciever:
         self._send_command_with_retry(f"/rotate {x} {y} {direction} ")
 
     def reset(self) -> None:
-        self._send_command_with_retry("/resetsurface")
-        time.sleep(1.0)
+        #self._send_command_with_retry("/resetsurface")
+        #time.sleep(2.0)
         self._send_command_with_retry("/reset")
         time.sleep(1.0)
         #starting times

@@ -1,3 +1,4 @@
+import shutil
 import time
 import torch
 import torch.nn as nn
@@ -9,6 +10,8 @@ from tqdm import tqdm
 import os
 import traceback
 import json
+import docker
+
 
 from OrePatchDetector import OrePatchDetector
 from config import Config
@@ -30,6 +33,13 @@ EPSILON_DECAY = 850000  # Decay rate for epsilon over time
 TARGET_UPDATE = 200  # Frequency of target network updates (in gradient steps)
 NUM_EPISODES = 25  # Total number of episodes to train the model
 AUTOSAVE_PATH = "autosave.pth"
+
+
+#-- Docker Parameters
+CONTAINER_NAME = "factorio"  # Name of the Factorio Docker container
+SAVE_FOLDER = r"C:\factorio_data\saves" # Path to the saves folder on the host machine
+SAVES_POOL = "./SAVES_POOL" # Path to the saves we use to test the AI this will be within this project
+
 
 
 class TimingTracker:
@@ -198,6 +208,24 @@ def load_checkpoint(path, policy_net, target_net, optimizer, memory):
     return checkpoint['episode'], checkpoint['env_steps_done'], checkpoint.get('updates_done', 0)
 
 
+class MapScheduler:
+    def __init__(self, pool_path):
+        self.pool_path = pool_path
+        self.queue = []
+
+    def get_next_map(self):
+        # Refill and shuffle if empty
+        if not self.queue:
+            print("Map queue empty. Refilling and shuffling...")
+            # Filter for .zip to avoid system files like .DS_Store
+            self.queue = [f for f in os.listdir(self.pool_path) if f.endswith('.zip')]
+            random.shuffle(self.queue)
+
+        return self.queue.pop()
+
+
+
+    #main training loop
 def train(resume_path=None):
     cfg = Config()
     env = FactorioEnv(cfg)
@@ -246,13 +274,48 @@ def train(resume_path=None):
     # === OUTER PROGRESS BAR (Episodes) ===
     outer_bar = tqdm(range(start_episode, NUM_EPISODES), desc="Total Progress", unit="ep", initial=start_episode, total=NUM_EPISODES)
 
+    #initalize map scheduler to shuffle maps
+    map_scheduler = MapScheduler(SAVES_POOL)
+
     for episode in outer_bar:
 
         # initalize ore map to know what to mine and where
         # save it to a file for use in ActionMasking
         # only need to do this once per episode because thats when the map resets
         # also time between episodes is long enough to not worry about timing this or it slowing down training
+
         try:
+            # 1. Get the next unique map from our scheduler
+            TARGET_SAVE = map_scheduler.get_next_map()
+            print(f"Next map selected: {TARGET_SAVE}")
+
+            # 2. Docker & Cleanup Logic
+            docker_client = docker.from_env()
+            container = docker_client.containers.get(CONTAINER_NAME)
+
+            print(f"Stopping container: {CONTAINER_NAME}...")
+            container.stop()
+            time.sleep(5)  # Wait for graceful shutdown
+
+            print("Emptying save folder...")
+            # clean out the existing save data
+            for item in os.listdir(SAVE_FOLDER):
+                item_path = os.path.join(SAVE_FOLDER, item)
+                if os.path.isfile(item_path):
+                    os.remove(item_path)
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+
+            # 3. Install the new map
+            source_path = os.path.join(SAVES_POOL, TARGET_SAVE)
+
+            shutil.copy2(source_path, os.path.join(SAVE_FOLDER, TARGET_SAVE))
+
+            print("Restarting container...")
+            container.start()
+            time.sleep(10) # Wait for Factorio server to boot up
+
+
             receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
             ore_map = receiver_ore.scan_ore()
 

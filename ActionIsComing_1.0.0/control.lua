@@ -149,13 +149,13 @@ end)
 --create new force
 function gameinit()
     local force_name = "AI"
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
     if not game.forces[force_name] then
         local new_force = game.create_force(force_name)
     end
 
     --Spawn in New Character at the start of the Game
-    local character = game.surfaces[2].create_entity{
+    local character = game.surfaces[1].create_entity{
         name = "character",
         position = {x = 0, y = 0},
         force = "AI"
@@ -171,7 +171,7 @@ end
 --Build something and remove it out of the characters inventory command
 --/build x y <index(1-31)> <direction(0-3)>
 commands.add_command("build", "", function(event)
-  local surface = game.surfaces[2]
+  local surface = game.surfaces[1]
 
   local params = {}
   for param in string.gmatch(event.parameter or "", "%S+") do
@@ -263,7 +263,7 @@ commands.add_command("rotate", "Rotate building at position: /rotate <x> <y> <di
     -- Default to 0 if input is invalid
     local direction = direction_map[dir_input] or 0
 
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
 
     -- Find entity at position
     local entities = surface.find_entities_filtered{
@@ -294,9 +294,9 @@ end)
 --Spawn a new Character(AI)
 --/spawn
 commands.add_command("spawn", "", function(event)
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
 
-    local character = game.surfaces[2].create_entity{
+    local character = game.surfaces[1].create_entity{
         name = "character",
         position = {x = 0, y = 0},
         force = "AI"
@@ -315,13 +315,13 @@ commands.add_command("mine", "", function(event)
     local y = params[2] or 0
 
     --find the character
-    local character = game.surfaces[2].find_entities_filtered{
+    local character = game.surfaces[1].find_entities_filtered{
         name = "character",
         force = "AI"
     }[1]
 
     --find the entity we want to mine
-    local entity = game.surfaces[2].find_entities_filtered{
+    local entity = game.surfaces[1].find_entities_filtered{
         position = {x, y},
         radius = 1
     }[1]
@@ -343,7 +343,7 @@ commands.add_command("moveto", "", function(event)
     local target_x = math.floor(params[1] or 0)
     local target_y = math.floor(params[2] or 0)
 
-    local character = game.surfaces[2].find_entities_filtered{
+    local character = game.surfaces[1].find_entities_filtered{
         name = "character",
         force = "AI"
     }[1]
@@ -412,7 +412,7 @@ end)
 --gives the character an item from the index (for debug)
 --/give <itemindex(1-52)> <amount>
 commands.add_command("give", "", function(event)
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
     --local player = game.get_player(event.player_index)
 
     local characters = surface.find_entities_filtered{
@@ -445,7 +445,7 @@ end)
 --Let the character craft an item
 --/craft <itemindex(1-52)> <amount>
 commands.add_command("craft", "", function(event)
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
 
     local characters = surface.find_entities_filtered{
         name = "character",
@@ -508,7 +508,7 @@ end)
 -- Gives character information
 -- Position and Inventory
 commands.add_command("char_info", "", function(event)
-  local surface = game.surfaces[2]
+  local surface = game.surfaces[1]
 
   -- Find AI Character
   local ai_characters = surface.find_entities_filtered{
@@ -557,7 +557,7 @@ end)
 --/insert x y <itemindex(1-52)> <amount>
 commands.add_command("insert_into", "AI Character inserts items into machine: /insert <item_id> <count> <x> <y>", function(event)
     --local player = game.players[event.player_index]
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
 
     -- Parse Parameter
     local params = {}
@@ -662,7 +662,7 @@ end)
 --change recipe of a machine
 --/c_recipe x y <itemindex(1-52)>
 commands.add_command("c_recipe", "Set recipe in machine: /c_recipe <x> <y> <recipe_id>", function(event)
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
 
     -- Parse Parameters
     local params = {}
@@ -723,7 +723,7 @@ end)
 --/take x y
 commands.add_command("take", "Take items from machine: /take <x> <y>", function(event)
     --local player = game.players[event.player_index]
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
 
     -- Parse Parameter
     local params = {}
@@ -804,22 +804,22 @@ commands.add_command("resetsurface", "", function(event)
 end)
 
 commands.add_command("reset", "", function(event)
-    local surface = game.surfaces[2]
-    local nauvis_settings = game.surfaces["nauvis"].map_gen_settings
+    local surface = game.surfaces[1]
+    --local nauvis_settings = game.surfaces["nauvis"].map_gen_settings
 
     -- Ändere den Seed in den Settings
-    local new_seed = math.random(1, 4294967295)
-    nauvis_settings.seed = new_seed
-    nauvis_settings.peaceful_mode = true
-    nauvis_settings.no_enemies_mode = true
-    nauvis_settings.cliff_settings = {richness = 0}
-    nauvis_settings.height = 1000
-    nauvis_settings.width = 1000
-    nauvis_settings.starting_area = 3
-
-
-    -- Erstelle die neue Surface mit den modifizierten Nauvis-Settings
-    local surface = game.create_surface("Test Surface", nauvis_settings)
+    --local new_seed = math.random(1, 4294967295)
+    --nauvis_settings.seed = new_seed
+    --nauvis_settings.peaceful_mode = true
+    --nauvis_settings.no_enemies_mode = true
+    --nauvis_settings.cliff_settings = {richness = 0}
+    --nauvis_settings.height = 1000
+    --nauvis_settings.width = 1000
+    --nauvis_settings.starting_area = 3
+    --
+    --
+    ---- Erstelle die neue Surface mit den modifizierten Nauvis-Settings
+    --local surface = game.create_surface("Test Surface", nauvis_settings)
 
     local types = {
         "assembling-machine",
@@ -948,7 +948,7 @@ end)
 script.on_event(defines.events.on_gui_click, function(event)
     if event.element.name == "Jimbo_button" then
         local player = game.players[event.player_index]
-        local surface = game.surfaces[2]
+        local surface = game.surfaces[1]
 
         local bot = surface.find_entities_filtered{name="character", force="AI"}[1]
 

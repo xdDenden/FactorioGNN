@@ -13,7 +13,7 @@ end)
 
 local function scan_entities()
     local entities_list = {}
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
     
     -- Alle Entities finden (kannst mehrere types hinzufügen)
 	local entities = surface.find_entities_filtered{
@@ -222,7 +222,7 @@ end
 
 local function scan_ore()
     local resources_list = {}
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
 
 
     local resources = surface.find_entities_filtered{
@@ -255,7 +255,7 @@ end
 
 local function scan_entities_boundingboxes()
 	local entities_list = {}
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
     
     -- Alle Entities finden (kannst mehrere types hinzufügen)
 	local entities = surface.find_entities_filtered{
@@ -298,7 +298,7 @@ end
 
 local function scan_resources()
     local resources_list = {}
-    local surface = game.surfaces[2]
+    local surface = game.surfaces[1]
 
 
     local resources = surface.find_entities_filtered{
