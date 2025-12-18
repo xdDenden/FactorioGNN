@@ -87,6 +87,7 @@ RECIPES = {
 
 # Define which items are mining drills
 MINING_DRILLS = {"burner-mining-drill", "electric-mining-drill"}
+OIL_EXTRACTORS = {"pumpjack"}
 
 
 # ==========================================
@@ -242,6 +243,18 @@ def get_action_masks(
         except Exception as e:
             print(f"Error loading patches: {e}")
 
+    # --- Load Ore Map for Crude Oil ---
+    crude_oil_coords = []
+    try:
+        with open('ore_map.json', 'r') as f:
+            ore_data = json.load(f)
+            # Filter specifically for crude-oil coordinates
+            crude_oil_coords = [item for item in ore_data if item.get('name') == 'crude-oil']
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"Error loading ore_map.json: {e}")
+
     # Detector instance
     detector = OrePatchDetector(ore_data=[])
 
@@ -356,6 +369,14 @@ def get_action_masks(
     # Check if player is near any ore patch center (for miner placement eligibility)
     player_near_ore_center = is_player_near_ore_patch_center(px, py, loaded_patches, distance_threshold=7.0)
 
+    # Check if player is near crude oil for pumpjack placement (within 4 tiles)
+    player_near_crude_oil = False
+    for oil_spot in crude_oil_coords:
+        dist = math.sqrt((px - oil_spot['x']) ** 2 + (py - oil_spot['y']) ** 2)
+        if dist <= 4.0:
+            player_near_crude_oil = True
+            break
+
     # 1. Check Inventory for buildable items
     for item_name, count in inventory.items():
         if count > 0:
@@ -368,6 +389,11 @@ def get_action_masks(
                     if player_near_ore_center:
                         item_mask[3, item_id] = 1.0
                         can_build_any = True
+                elif item_name in OIL_EXTRACTORS:
+                    # Only enable pumpjack if player is near crude oil (within 4 tiles)
+                    if player_near_crude_oil:
+                        item_mask[3, item_id] = 1.0
+                        can_build_any = True
                 else:
                     # Regular buildings can always be placed (subject to spatial constraints)
                     item_mask[3, item_id] = 1.0
@@ -377,8 +403,9 @@ def get_action_masks(
     # For mining drills: Also check if location is within an ore patch
     valid_build_locs = flat_empty_mask & flat_reach_mask
 
-    # Create separate spatial masks for miners vs regular buildings
+    # Create separate spatial masks for miners vs regular buildings vs pumpjacks
     miner_spatial_mask = np.zeros(grid_size, dtype=bool)
+    pumpjack_spatial_mask = np.zeros(grid_size, dtype=bool)
     regular_spatial_mask = valid_build_locs.copy()
 
     if player_near_ore_center:
@@ -401,17 +428,43 @@ def get_action_masks(
                     if patches_at_pos:
                         miner_spatial_mask[flat_idx] = True
 
+    if player_near_crude_oil:
+        # Calculate valid pumpjack locations (must be on top of crude oil)
+        for gy in range(grid_steps):
+            for gx in range(grid_steps):
+                flat_idx = gy * grid_steps + gx
+
+                # Must be empty and reachable
+                if not valid_build_locs[flat_idx]:
+                    continue
+
+                wx = min_x + (gx * step_x) + (step_x / 2)
+                wy = min_y + (gy * step_y) + (step_y / 2)
+
+                # Check if this grid cell covers a crude oil coordinate
+                # Since we want to place it on the oil, check distance to oil spots
+                for oil_spot in crude_oil_coords:
+                    dist_to_spot = math.sqrt((wx - oil_spot['x']) ** 2 + (wy - oil_spot['y']) ** 2)
+                    # Assuming grid steps approx 1 unit, check if very close
+                    if dist_to_spot < 1.5:
+                        pumpjack_spatial_mask[flat_idx] = True
+                        break
+
     # Check which buildable items the player has
     has_miner = any(item_name in MINING_DRILLS and inventory.get(item_name, 0) > 0 for item_name in MINING_DRILLS)
+    has_pumpjack = any(item_name in OIL_EXTRACTORS and inventory.get(item_name, 0) > 0 for item_name in OIL_EXTRACTORS)
     has_regular_building = any(
-        inventory.get(item_name, 0) > 0 and MACHINE_NAME_MAP.get(item_name, 0) > 0 and item_name not in MINING_DRILLS
+        inventory.get(item_name, 0) > 0 and MACHINE_NAME_MAP.get(item_name,
+                                                                 0) > 0 and item_name not in MINING_DRILLS and item_name not in OIL_EXTRACTORS
         for item_name in inventory.keys()
     )
 
-    # Combine spatial masks: allow miner locations OR regular building locations
+    # Combine spatial masks: allow miner locations OR regular building locations OR pumpjack locations
     combined_spatial_mask = np.zeros(grid_size, dtype=bool)
     if has_miner and player_near_ore_center:
         combined_spatial_mask |= miner_spatial_mask
+    if has_pumpjack and player_near_crude_oil:
+        combined_spatial_mask |= pumpjack_spatial_mask
     if has_regular_building:
         combined_spatial_mask |= regular_spatial_mask
 
