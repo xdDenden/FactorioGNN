@@ -223,7 +223,7 @@ commands.add_command("build", "", function(event)
 
   local pos = {x, y}
 
-  if surface.can_place_entity{name = building, position = pos, force = "AI", direction = direction} then
+  if surface.can_place_entity{name = building, position = pos, force = "AI", direction = direction,build_check_type=defines.build_check_type.manual} then
 
     --remove item out of the inventory of the character
     character.remove_item{name = building, count = 1}

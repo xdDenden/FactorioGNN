@@ -35,7 +35,7 @@ FEATURE_DIM = (
 )
 
 
-def create_grid_hypergraph(entities: List[Any], grid_size: int = 10) -> torch.Tensor:
+def create_grid_hypergraph(entities: List[Any], grid_size: int = 4) -> torch.Tensor:
     """
     Creates a hypergraph incidence matrix based on a spatial grid.
     Returns H: (num_nodes, num_hyperedges)

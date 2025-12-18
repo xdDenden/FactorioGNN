@@ -89,7 +89,7 @@ def map_items(char_info: CharInfo, bounds: Tuple[int, int, int, int]) -> Dict[st
 
 # --- Feature Transformation ---
 
-def compute_bounds(entities: List[Entity], char_info: Optional[CharInfo] = None, radius: int = 250) -> Tuple[
+def compute_bounds(entities: List[Entity], char_info: Optional[CharInfo] = None, radius: int = 64) -> Tuple[
     int, int, int, int]:
     # 1. Determine Center Point (Player Position)
     # Default to 0,0 if char_info is missing
