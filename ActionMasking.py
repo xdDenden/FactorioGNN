@@ -125,7 +125,7 @@ def world_to_grid(x: float, y: float, bounds: Tuple[int, int, int, int], grid_st
     return grid_x, grid_y
 
 
-def check_reach(p_x, p_y, t_x, t_y, max_dist=75.0):
+def check_reach(p_x, p_y, t_x, t_y, max_dist=30.0):
     """Checks if target (t_x, t_y) is within reach of player (p_x, p_y)."""
     return math.sqrt((p_x - t_x) ** 2 + (p_y - t_y) ** 2) <= max_dist
 
