@@ -8,7 +8,7 @@ class Config:
     RCON_PORT: int = 27015
     RCON_PASSWORD: str = "eenie7Uphohpaim"
 
-    # --- BATCH & BURST SETTINGS ---
+    # BATCH & BURST SETTINGS
     COLLECTION_STEPS: int = 2048  # Play this many steps (~2 seconds at 60fps)
     TRAIN_EPOCHS: int = 512  # Then train this many times back-to-back
     

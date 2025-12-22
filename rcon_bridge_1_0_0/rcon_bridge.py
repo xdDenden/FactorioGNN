@@ -5,6 +5,8 @@ from typing import List, Dict, Any, Optional
 import factorio_rcon
 from typing import TypedDict, Any, List
 
+import config
+
 HOST = "localhost"
 PORT = 27015
 PASSWORD = "eenie7Uphohpaim"
@@ -160,14 +162,16 @@ class Rcon_reciever:
     def build(self, x: float, y: float, buildingIndex: int, rotation: int) -> bool:
         # 1. check distance
         if not self.distanceCheck(x, y):
-            print(f"Build failed: Target ({x}, {y}) is too far away.")
+            if config.Config.VERBOSE:
+                print(f"Build failed: Target ({x}, {y}) is too far away.")
             return False
 
         message = self._send_command_with_retry(f"/build {x} {y} {buildingIndex} {rotation} ")
 
         # 3. ONLY receive if we actually sent the command
         if "ERROR" or "FAILED" in message:
-            print(f"Build Error from server: {message}")  # Optional logging
+            if config.Config.VERBOSE:
+                print(f"Build Error from server: {message}")
             return False
         else:
             return True
@@ -213,6 +217,14 @@ class Rcon_reciever:
             ores = json.loads(response)
             #ores = []
         return ores
+
+    def scan_research(self) -> List[Dict[str, Any]]:
+        response = self._send_command_with_retry("/scan_research")
+        if not response or not response.strip():
+            return []
+        else:
+            research = json.loads(response)
+        return research
 
 
 

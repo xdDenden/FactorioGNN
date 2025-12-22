@@ -17,6 +17,7 @@ from OrePatchDetector import OrePatchDetector
 from config import Config
 from environment import FactorioEnv
 from FactorioHGNN import FactorioHGNN
+from mappings import get_available_items
 from plotting import TrainingLogger
 from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
 from ActionMasking import get_action_masks
@@ -392,11 +393,15 @@ def train(resume_path=None):
 
                 bounds = env.current_bounds
 
+                research = env.receiver.scan_research()
+                valid_items = get_available_items(research)
+                print(f"Valid items based on research: {valid_items}")
+
                 masks = get_action_masks(
                     entities=raw_entities,
                     player_info=raw_player,
                     inventory=inventory,
-                    science_level=1, # Placeholder
+                    science_level=1,
                     bounds=bounds,
                     patches = patches,
                     move_state = env.move_state
@@ -404,7 +409,7 @@ def train(resume_path=None):
                 timer.record('mask_calc', timeit.default_timer() - t_start)
 
                 # --- DEBUG PRINT (Check once per 100 steps) ---
-                if t % 100 == 0:
+                if t % 100 == 0 and Config.VERBOSE==True:
                     act_mask, item_mask, space_mask = masks
                     print(f"\n[DEBUG Step {t}] Action Mask: {act_mask}")
                     #print(f"Inventory: {inventory}")

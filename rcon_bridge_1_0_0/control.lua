@@ -408,7 +408,6 @@ local AI_RESEARCH_QUEUE = {
 local moving_characters = {}
 
 local buildings = {
-  "wooden-chest",
   "storage-tank",
   "transport-belt",
   "fast-transport-belt",
