@@ -232,7 +232,7 @@ def get_action_masks(
         try:
             with open('patches.json', 'r') as f:
                 data = json.load(f)
-                # FIX: Reconstruct Polygon objects from boundary points
+                # Reconstruct Polygon objects from boundary points
                 for p in data:
                     if 'boundary' in p:
                         p['polygon'] = Polygon(p['boundary'])
@@ -270,7 +270,7 @@ def get_action_masks(
             # Approx world pos of this grid cell
             wx = min_x + (gx * step_x)
             wy = min_y + (gy * step_y)
-            if check_reach(px, py, wx, wy, max_dist=75):
+            if check_reach(px, py, wx, wy, max_dist=30):
                 reach_grid[gy, gx] = True
 
     flat_reach_mask = reach_grid.flatten()
@@ -309,7 +309,7 @@ def get_action_masks(
             wy = min_y + (gy * step_y) + (step_y / 2)
 
             # 2. Check Reach
-            if not check_reach(px, py, wx, wy, max_dist=75):
+            if not check_reach(px, py, wx, wy, max_dist=30):
                 continue
 
             # 3. Check for valid Ore Patch (excluding crude-oil)

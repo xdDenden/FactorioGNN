@@ -39,7 +39,9 @@ def translateGNNtoFactorio(x, y, action, item, rotation, receiver, verbose) -> s
                     full_log += " [FAILED: No item specified for crafting]"
             case 3:  # build
                 if item is not None and rotation is not None:
-                    receiver.build(x, y, item, rotation)
+                   result = receiver.build(x, y, item, rotation)
+                   if not result:
+                       full_log += " [FAILED: Build command was unsuccessful]"
                 else:
                     full_log += " [FAILED: No recipe or rotation specified for building]"
             case 4:  # insert

@@ -20,51 +20,64 @@ class OrePatchDetector:
         self.min_samples = min_samples
         self.patches = []
 
-    def process_patches(self):
-        """Group ore positions into patches and compute convex hulls."""
-        # Group by ore type
-        ore_types = {}
-        for ore in self.ore_data:
-            ore_type = ore['name']
-            if ore_type not in ore_types:
-                ore_types[ore_type] = []
-            ore_types[ore_type].append([ore['x'], ore['y']])
+    def process_patches(self, tree_gap=10.0):
+        """
+        Group positions into patches and compute convex hulls.
+        tree_gap: The max distance (tiles) allowed between trees to be part of the same forest.
+        """
+        groups = {}
 
-        # Process each ore type
-        for ore_type, positions in ore_types.items():
+        # 1. Group Data: Merge all tree names into one 'tree' category
+        for entity in self.ore_data:
+            # Check if entity is a tree (using 'type' from Lua or name fallback)
+            is_tree = entity.get('type') == 'tree' or 'tree' in entity['name']
+
+            # If it's a tree, use a generic key. If it's ore, use the specific name.
+            group_key = 'tree' if is_tree else entity['name']
+
+            if group_key not in groups:
+                groups[group_key] = []
+            groups[group_key].append([entity['x'], entity['y']])
+
+        # 2. Process each group (Ores and Trees)
+        for group_key, positions in groups.items():
             positions = np.array(positions)
 
-            # Cluster nearby positions using DBSCAN
-            clustering = DBSCAN(eps=self.eps, min_samples=self.min_samples).fit(positions)
+            # SELECT EPSILON: Use tree_gap for trees, default self.eps for ores
+            if group_key == 'tree':
+                current_eps = tree_gap
+                current_min_samples = 5  # Optional: Trees might need a different density threshold
+            else:
+                current_eps = self.eps
+                current_min_samples = self.min_samples
+
+            # Cluster using the selected epsilon
+            clustering = DBSCAN(eps=current_eps, min_samples=current_min_samples).fit(positions)
             labels = clustering.labels_
 
             # Create convex hull for each cluster
             for label in set(labels):
-                if label == -1:  # Skip noise points
+                if label == -1:  # Skip noise
                     continue
 
                 cluster_points = positions[labels == label]
 
-                # Need at least 3 points for convex hull
                 if len(cluster_points) < 3:
                     continue
 
                 try:
                     hull = ConvexHull(cluster_points)
                     hull_points = cluster_points[hull.vertices]
-
-                    # Create polygon for fast point-in-polygon tests
                     polygon = Polygon(hull_points)
 
                     self.patches.append({
-                        'ore_type': ore_type,
+                        'ore_type': group_key,  # Will be 'tree' or 'iron-ore', etc.
                         'boundary': hull_points.tolist(),
                         'polygon': polygon,
                         'center': cluster_points.mean(axis=0).tolist(),
                         'size': len(cluster_points)
                     })
-                except:
-                    # Skip degenerate cases
+                except Exception as e:
                     continue
 
         return self.patches

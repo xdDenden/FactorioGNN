@@ -8,7 +8,7 @@ from typing import TypedDict, Any, List
 HOST = "localhost"
 PORT = 27015
 PASSWORD = "eenie7Uphohpaim"
-TIMEOUT = 5.0
+TIMEOUT = 1.0
 
 class Position(TypedDict):
     x: float
@@ -41,7 +41,7 @@ class EntityData(TypedDict):
     bounding_box: BoundingBox
 
 class Rcon_reciever:
-    def __init__(self, host: str = HOST, password: str = PASSWORD , port: int = PORT,timeout: float = 5.0 ,):
+    def __init__(self, host: str = HOST, password: str = PASSWORD , port: int = PORT,timeout: float = 1.0 ,):
         self.host = host
         self.password = password
         self.port = port
@@ -157,9 +157,20 @@ class Rcon_reciever:
         if self.distanceCheck(x, y):
             self._send_command_with_retry(f"/c_recipe {x} {y} {itemIndex} ")
 
-    def build(self, x: float, y: float, buildingIndex: int, rotation: int) -> None:
-        if self.distanceCheck(x, y):
-            self._send_command_with_retry(f"/build {x} {y} {buildingIndex} {rotation} ")
+    def build(self, x: float, y: float, buildingIndex: int, rotation: int) -> bool:
+        # 1. check distance
+        if not self.distanceCheck(x, y):
+            print(f"Build failed: Target ({x}, {y}) is too far away.")
+            return False
+
+        message = self._send_command_with_retry(f"/build {x} {y} {buildingIndex} {rotation} ")
+
+        # 3. ONLY receive if we actually sent the command
+        if "ERROR" or "FAILED" in message:
+            print(f"Build Error from server: {message}")  # Optional logging
+            return False
+        else:
+            return True
 
     def distanceCheck(self, x2: float, y2: float) -> bool:
         # We generally expect self._rcon to be set, but if it's broken,

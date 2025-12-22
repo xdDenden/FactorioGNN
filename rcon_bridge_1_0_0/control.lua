@@ -8,7 +8,7 @@ local function scan_entities()
     -- Alle Entities finden (kannst mehrere types hinzufügen)
 	local entities = surface.find_entities_filtered{
 		position = {0, 0},  -- Spawn position (oder player position wenn jemand online)
-		radius = 1000,  -- Scan Radius
+		radius = 128,  -- Scan Radius
 		type = {
 			"assembling-machine",
 			"furnace",
@@ -210,33 +210,34 @@ local function scan_entities()
     return json.encode(entities_list)
 end
 
+
 local function scan_ore()
     local resources_list = {}
     local surface = game.surfaces[1]
 
-
-    local resources = surface.find_entities_filtered{
+    local entities = surface.find_entities_filtered{
         position = {0, 0},
-        type = "resource",
+        type = {"resource", "tree"},
         radius = 250
     }
 
-    for _, resource in pairs(resources) do
+    for _, entity in pairs(entities) do
 
-        if resource.name == "iron-ore" or
-           resource.name == "copper-ore" or
-           resource.name == "coal" or
-           resource.name == "crude-oil" or
-           resource.name == "stone" then
+        if entity.type == "tree" or
+           entity.name == "iron-ore" or
+           entity.name == "copper-ore" or
+           entity.name == "coal" or
+           entity.name == "crude-oil" or
+           entity.name == "stone" then
 
-
-            local resource_data = {
-                name = resource.name,
-                x = resource.position.x,
-                y = resource.position.y
+            local entity_data = {
+                name = entity.name,
+                type = entity.type,
+                x = entity.position.x,
+                y = entity.position.y
             }
 
-            table.insert(resources_list, resource_data)
+            table.insert(resources_list, entity_data)
         end
     end
 
@@ -538,62 +539,46 @@ commands.add_command("build", "", function(event)
   local index = tonumber(params[3])
   local dir_input = tonumber(params[4]) or 0
 
-  -- Maps input 0-3 to specific Factorio direction integers
   local direction_map = {
-    [0] = 0,   -- Input 0 -> 0
-    [1] = 4,   -- Input 1 -> 4
-    [2] = 8,   -- Input 2 -> 8
-    [3] = 12   -- Input 3 -> 12
+    [0] = 0, [1] = 4, [2] = 8, [3] = 12
   }
-
-  -- Select direction from map, default to 0 if input is weird
   local direction = direction_map[dir_input] or 0
-
   local building = buildings[index]
 
+  -- CASE 1: Invalid Index
   if not building then
-    game.print("Invalid index!")
+    rcon.print("ERROR: Invalid building index!")
     return
   end
 
-  local characters = surface.find_entities_filtered{
-    name = "character",
-    force = "AI"
-  }
-
+  local characters = surface.find_entities_filtered{name = "character", force = "AI"}
   local character = characters[1]
 
-  -- Safety check if character exists
+  -- CASE 2: No Character
   if not character then
-    game.print("No AI character found")
+    rcon.print("ERROR: No AI character found")
     return
   end
 
   local item_count = character.get_item_count(building)
 
+  -- CASE 3: No Inventory
   if item_count < 1 then
-    game.print("char has no " .. building .. " in the inventory")
+    rcon.print("ERROR: Character has no " .. building .. " in inventory")
     return
   end
 
   local pos = {x, y}
 
-  if surface.can_place_entity{name = building, position = pos, force = "AI", direction = direction,build_check_type=defines.build_check_type.manual} then
-
-    --remove item out of the inventory of the character
+  if surface.can_place_entity{name = building, position = pos, force = "AI", direction = direction, build_check_type=defines.build_check_type.manual} then
     character.remove_item{name = building, count = 1}
+    surface.create_entity{name = building, position = pos, force = "AI", direction = direction}
 
-    --method to create the entity
-    surface.create_entity{
-      name = building,
-      position = pos,
-      force = "AI",
-      direction = direction
-    }
-
-    game.print("Built " .. building .. " (Remaining: " .. (item_count - 1) .. ") Direction val: " .. direction)
+    -- CASE 4: Success (Crucial Fix: Send confirmation to RCON)
+    rcon.print("SUCCESS: Built " .. building .. " (Remaining: " .. (item_count - 1) .. ")")
   else
-    game.print("you can't place there")
+    -- CASE 5: Obstructed
+    rcon.print("ERROR: Cannot place " .. building .. " at (" .. x .. ", " .. y .. ")")
   end
 end)
 
