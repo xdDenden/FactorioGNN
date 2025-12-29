@@ -80,21 +80,23 @@ class Rcon_reciever:
         try:
             return self._rcon.send_command(command)
         except Exception as e:
-            # Check for RCONNotConnected or other connection errors.
-            # We check the exception name to be robust against import differences.
+            # Check for RCONNotConnected or other connection errors
+            # We check the exception name to be robust against import difference
             error_name = type(e).__name__
             if "RCONNotConnected" in error_name or "ConnectionError" in error_name:
                 print(f"RCON Connection lost ({e}). Attempting to reconnect...")
                 try:
+                    self.disconnect()
+                    time.sleep(2.5)
                     self.connect()
-                    time.sleep(0.1)
+                    time.sleep(2.5)
                     return self._rcon.send_command(command)
                 except Exception as retry_e:
                     print(f"Reconnection failed: {retry_e}")
                     raise retry_e
             else:
                 try:
-                    time.sleep(0.1)
+                    time.sleep(2.5)
                     return self._rcon.send_command(command)
                 except Exception as e:
                     raise e

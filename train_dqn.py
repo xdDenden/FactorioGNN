@@ -30,7 +30,7 @@ BATCH_SIZE = 32  # Number of samples per training batch
 BUFFER_SIZE = 50000  # Maximum size of the replay buffer
 EPSILON_START = 1.0  # Initial value of epsilon for epsilon-greedy policy
 EPSILON_END = 0.05  # Minimum value of epsilon for epsilon-greedy policy
-EPSILON_DECAY = 850000  # Decay rate for epsilon over time
+EPSILON_DECAY = 563698  # Decay rate for epsilon over time
 TARGET_UPDATE = 200  # Frequency of target network updates (in gradient steps)
 NUM_EPISODES = 50  # Total number of episodes to train the model
 AUTOSAVE_PATH = "autosave.pth"
@@ -200,7 +200,7 @@ def load_checkpoint(path, policy_net, target_net, optimizer, memory):
         return 0, 0, 0 # start_episode, env_steps_done, updates_done
 
     print(f"Loading checkpoint from {path}...")
-    checkpoint = torch.load(path)
+    checkpoint = torch.load(path, weights_only=False)
     policy_net.load_state_dict(checkpoint['policy_net'])
     target_net.load_state_dict(checkpoint['target_net'])
     optimizer.load_state_dict(checkpoint['optimizer'])
@@ -319,10 +319,11 @@ def train(resume_path=None):
 
             receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
             ore_map = receiver_ore.scan_ore()
-
+            time.sleep(3)
             # Save as JSON instead of string representation
             with open("ore_map.json", "w") as ore_file:
                 json.dump(ore_map, ore_file)
+            print("Ores scanned")
             receiver_ore.disconnect()
 
             # Then process the ores map for use in ActionMasking
@@ -395,16 +396,16 @@ def train(resume_path=None):
 
                 research = env.receiver.scan_research()
                 valid_items = get_available_items(research)
-                print(f"Valid items based on research: {valid_items}")
+                #print(f"Valid items based on research: {valid_items}")
 
                 masks = get_action_masks(
                     entities=raw_entities,
                     player_info=raw_player,
                     inventory=inventory,
-                    science_level=1,
+                    available_items=valid_items,
                     bounds=bounds,
-                    patches = patches,
-                    move_state = env.move_state
+                    patches=patches,
+                    move_state=env.move_state
                 )
                 timer.record('mask_calc', timeit.default_timer() - t_start)
 
@@ -593,28 +594,48 @@ def train(resume_path=None):
 
 
 if __name__ == "__main__":
-    MAX_RETRIES = 3
-    RETRY_DELAY = 30
+    # --- CONFIGURATION ---
+    MAX_RETRIES = 3           # Maximum "health"
+    REGAIN_TIME_SEC = 600     # Time in seconds to regain 1 retry (10 mins)
+    RETRY_DELAY = 30          # Wait time after a crash
 
-    for attempt in range(MAX_RETRIES + 1):
+    current_retries = MAX_RETRIES
+
+    # --- USER SELECTION ---
+    # autosave or new run
+    print("\nSelect Start Mode:")
+    print("0: Resume from AUTOSAVE")
+    print("1: Start NEW training")
+    user_choice = input("Enter selection: ").strip()
+
+    # Determine initial resume state
+    if user_choice == "0":
+        if os.path.exists(AUTOSAVE_PATH):
+            print(">> Selected: RESUME. Will load autosave.pth.")
+            resume_path = AUTOSAVE_PATH
+        else:
+            print(">> Selected: RESUME, but no file found. Switching to NEW.")
+            resume_path = None
+    elif user_choice == "1":
+        print(">> Selected: NEW. Starting fresh (previous autosave will be overwritten).")
+        resume_path = None
+    else:
+        print(f">> Invalid input '{user_choice}'. Defaulting to NEW.")
+        resume_path = None
+
+    # --- MAIN RESILIENCE LOOP ---
+    while True:
         try:
-            # If attempt > 0, we must try to resume.
-            # If attempt == 0, we check if we should resume or start fresh.
-            # Assuming if an autosave exists, we prefer it for crash resilience,
-            # OR we can assume first run is fresh unless specified.
-            # Given the request is "if it crashes... retry to continue from that autosave",
-            # we will enable resume if attempt > 0.
+            # Start the timer for this run
+            start_time = time.time()
 
-            should_resume = (attempt > 0) and os.path.exists(AUTOSAVE_PATH)
-
-            if attempt > 0:
-                print(f"\n=== ATTEMPT {attempt}/{MAX_RETRIES} (Resuming from autosave) ===")
+            if resume_path:
+                print(f"\n=== STARTING RUN (Resuming) | Retries left: {current_retries}/{MAX_RETRIES} ===")
             else:
-                print(f"\n=== ATTEMPT {attempt}/{MAX_RETRIES} ===")
-                # Optional: You could delete AUTOSAVE_PATH here if you wanted a strictly fresh start
-                # unless you want to support manual resuming from a previous run.
+                print(f"\n=== STARTING RUN (Fresh) | Retries left: {current_retries}/{MAX_RETRIES} ===")
 
-            train(resume_path=AUTOSAVE_PATH if should_resume else None)
+            # Run training
+            train(resume_path=resume_path)
 
             # If train completes successfully, break the retry loop
             print("Training finished successfully.")
@@ -624,12 +645,38 @@ if __name__ == "__main__":
             print("\nStopped by user.")
             break
         except Exception as e:
-            print(f"\nCRASH DETECTED on attempt {attempt}: {e}")
-            traceback.print_exc()
+            # 1. Calculate duration
+            end_time = time.time()
+            duration = end_time - start_time
 
-            if attempt < MAX_RETRIES:
+            # 2. Regenerate retries based on runtime
+            regained_retries = int(duration // REGAIN_TIME_SEC)
+
+            # Apply regen (capped at MAX)
+            if regained_retries > 0:
+                print(f"\n>> Stable run of {duration:.0f}s. Regained {regained_retries} retry credit(s).")
+
+            current_retries = min(MAX_RETRIES, current_retries + regained_retries)
+
+            # 3. Pay the cost for the crash
+            current_retries -= 1
+
+            print(f"\nCRASH DETECTED: {e}")
+            traceback.print_exc()
+            print(f"Retries remaining: {current_retries}/{MAX_RETRIES}")
+
+            # 4. Check if we are dead
+            if current_retries < 0:
+                print("Max retries exceeded (Ran out of credits). Exiting.")
+                raise e
+
+            # 5. Prepare for restart
                 print(f"Waiting {RETRY_DELAY} seconds before retrying...")
                 time.sleep(RETRY_DELAY)
+
+            # IMPORTANT: Always force resume on retry
+            if os.path.exists(AUTOSAVE_PATH):
+                resume_path = AUTOSAVE_PATH
             else:
-                print("Max retries reached. Exiting with error.")
-                raise e
+                # If we crashed before creating the first autosave, we just try fresh again
+                resume_path = None

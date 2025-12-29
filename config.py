@@ -13,7 +13,7 @@ class Config:
     TRAIN_EPOCHS: int = 512  # Then train this many times back-to-back
     
     # RL / Training Settings
-    MAX_TIMESTEPS: int = 50000
+    MAX_TIMESTEPS: int = 20000
     Random_Seed: int = 67
 
     # Model Settings

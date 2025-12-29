@@ -1,148 +1,258 @@
+import shutil
+import time
 import torch
-import traceback
-import random
+import torch.nn as nn
 import numpy as np
+import random
+from collections import deque, defaultdict
+from tqdm import tqdm
+import os
+import traceback
+import json
+import docker
+import timeit
+
+from OrePatchDetector import OrePatchDetector
 from config import Config
 from environment import FactorioEnv
 from FactorioHGNN import FactorioHGNN
+from mappings import get_available_items
+from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
 from ActionMasking import get_action_masks
 
+# --- Parameters ---
+WEIGHTS_PATH = "jimbo_dqn_weights.pth"  # Path to trained model
+CONTAINER_NAME = "factorio"
+SAVE_FOLDER = r"C:\factorio_data\saves"
+SAVES_POOL = "./SAVES_POOL"
+epsilon_inference = 0.02  # Very low noise to prevent getting stuck in infinite loops
+
+
+class MapScheduler:
+    def __init__(self, pool_path):
+        self.pool_path = pool_path
+        self.queue = []
+
+    def get_next_map(self):
+        if not self.queue:
+            print("Map queue empty. Refilling and shuffling...")
+            self.queue = [f for f in os.listdir(self.pool_path) if f.endswith('.zip')]
+            random.shuffle(self.queue)
+        return self.queue.pop()
+
+
 def apply_mask_to_logits(logits, mask):
-    mask_t = torch.tensor(mask, device=logits.device, dtype=torch.bool)
+    """Sets logits to -inf where mask is 0."""
+    if not isinstance(mask, torch.Tensor):
+        mask_t = torch.tensor(mask, device=logits.device, dtype=torch.bool)
+    else:
+        mask_t = mask.bool()
+
     masked_logits = logits.clone()
     masked_logits[~mask_t] = -1e9
     return masked_logits
 
-# /c game.speed = 4
-#test
+
+def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
+    """
+    Identical to training logic, but allows us to force low/zero epsilon.
+    """
+    act_mask, item_mask, space_mask = masks
+
+    # Even in inference, a tiny bit of epsilon helps break "wiggling" loops
+    if random.random() < epsilon:
+        # --- MASKED RANDOM ---
+        valid_actions = np.nonzero(act_mask)[0]
+        act = random.choice(valid_actions) if len(valid_actions) > 0 else 0
+
+        valid_items = np.nonzero(item_mask[act])[0]
+        item = random.choice(valid_items) if len(valid_items) > 0 else 0
+
+        rot = random.randint(0, 3)
+
+        valid_locs = np.nonzero(space_mask[act])[0]
+        heatmap_idx = random.choice(valid_locs) if len(valid_locs) > 0 else 0
+
+        h_next = (torch.zeros(1, 256).to(device), torch.zeros(1, 256).to(device))
+        return act, item, rot, heatmap_idx, h_next
+
+    else:
+        # --- MASKED GREEDY ---
+        with torch.no_grad():
+            q_act, q_item, q_rot, q_map, h_next = model(node_feats, H, hidden_state)
+
+            # 1. Mask Action
+            masked_q_act = apply_mask_to_logits(q_act.view(-1), act_mask)
+            act = masked_q_act.argmax().item()
+
+            # 2. Mask Item (dependent on action)
+            masked_q_item = apply_mask_to_logits(q_item.view(-1), item_mask[act])
+            item = masked_q_item.argmax().item()
+
+            # 3. Rotation
+            rot = q_rot.argmax().item()
+
+            # 4. Mask Heatmap (dependent on action)
+            masked_q_map = apply_mask_to_logits(q_map.view(-1), space_mask[act])
+            heatmap_idx = masked_q_map.argmax().item()
+
+            return act, item, rot, heatmap_idx, h_next
 
 
-def main():
-    # 1. Setup
+def play():
     cfg = Config()
+    # Force verbose to true to see what the bot is doing
+    Config.VERBOSE = True
+
     env = FactorioEnv(cfg)
 
-    # 2. Initialize Model
-    use_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-    device = torch.device("cuda" if torch.cuda.is_available() else ("mps" if use_mps else "cpu"))
-    print(f"Running on {device}")
-    model = FactorioHGNN(
-        hidden_dim=cfg.HIDDEN_DIM,
-        lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM
-    ).to(device)
+    # 1. Device Setup
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+    print(f"Inference running on {device}")
 
-   # Load weights if available
-    try:
-        model.load_state_dict(torch.load("jimbo_dqn_weights.pth", map_location=device))
-        print("Loaded weights from jimbo_dqn_weights.pth")
-    except FileNotFoundError:
-        print("No weights found, running with random init.")
+    # 2. Load Model
+    model = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
 
-    model.eval()
-    hidden_state = None
-
-
-    # Point 1: Epsilon-Greedy Setup
-    epsilon = 0.2  # Exploration rate (could be moved to Config)
-
-    # 3. Reset Environment
-    observation = env.reset()
-    if observation is None:
+    if os.path.exists(WEIGHTS_PATH):
+        print(f"Loading weights from {WEIGHTS_PATH}...")
+        # map_location ensures weights load to the correct device
+        model.load_state_dict(torch.load(WEIGHTS_PATH, map_location=device, weights_only=True))
+    else:
+        print(f"CRITICAL: Weights file {WEIGHTS_PATH} not found!")
         return
 
-    print(f"Starting Loop for {cfg.MAX_TIMESTEPS} steps...")
+    model.eval()
 
-    try:
-        for step in range(cfg.MAX_TIMESTEPS):
-            # A. Get Data
-            node_features, H = observation
-            node_features = node_features.to(device)
-            H = H.to(device)
+    # 3. Map Scheduler
+    map_scheduler = MapScheduler(SAVES_POOL)
 
-            # --- MASK GENERATION ---
-            raw_entities = env._last_raw_entities
-            raw_player = env._last_raw_player
-            inv_list = raw_player.get('inventory', [])
-            inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
-            bounds = env.current_bounds
+    print("\n=== STARTING INFINITE PLAY LOOP ===")
+    print("Press Ctrl+C to stop.")
 
-            act_mask, item_mask, space_mask = get_action_masks(
-                entities=raw_entities,
-                player_info=raw_player,
-                inventory=inventory,
-                science_level=1,
-                bounds=bounds,
-                move_state=env.move_state
-            )
+    while True:
+        # --- PREPARATION PHASE (Docker & Maps) ---
+        try:
+            # Pick Map
+            TARGET_SAVE = map_scheduler.get_next_map()
+            print(f"\nLoading Map: {TARGET_SAVE}")
 
-            # B. Model Inference
-            with torch.no_grad():
-                (action_logits,
-                 item_logits,
-                 rotation_logits,
-                 heatmap_logits,
-                 hidden_state) = model(node_features, H, hidden_state)
+            # Docker Reset
+            docker_client = docker.from_env()
+            container = docker_client.containers.get(CONTAINER_NAME)
 
-            # C. Select Action - Point 1: Epsilon Greedy
-            if random.random() < epsilon:
-                # --- MASKED RANDOM ---
-                valid_actions = np.nonzero(act_mask)[0]
-                action_idx = random.choice(valid_actions) if len(valid_actions) > 0 else 0
+            print(f"Resetting environment...")
+            container.stop()
+            time.sleep(2)
 
-                valid_items = np.nonzero(item_mask[action_idx])[0]
-                item_idx = random.choice(valid_items) if len(valid_items) > 0 else 0
+            # Clean saves
+            for item in os.listdir(SAVE_FOLDER):
+                item_path = os.path.join(SAVE_FOLDER, item)
+                if os.path.isfile(item_path):
+                    os.remove(item_path)
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
 
-                rotation_idx = random.randint(0, 3)
+            # Copy new save
+            shutil.copy2(os.path.join(SAVES_POOL, TARGET_SAVE), os.path.join(SAVE_FOLDER, TARGET_SAVE))
 
-                valid_locs = np.nonzero(space_mask[action_idx])[0]
-                flat_map_idx = random.choice(valid_locs) if len(valid_locs) > 0 else 0
+            container.start()
+            print("Server starting...")
+            time.sleep(10)  # Wait for boot
 
-                y_grid_idx = flat_map_idx // 17
-                x_grid_idx = flat_map_idx % 17
+            # Ore Scanning (Crucial for ActionMasking)
+            receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
+            ore_map = receiver_ore.scan_ore()
+            time.sleep(2)
 
-            else:
-                # --- MASKED GREEDY ---
-                # 1. Action
-                masked_act_logits = apply_mask_to_logits(action_logits.view(-1), act_mask)
-                action_idx = torch.argmax(masked_act_logits).item()
+            detector = OrePatchDetector(ore_map)
+            patches = detector.process_patches()
+            receiver_ore.disconnect()
+            print(f"Ores detected: {len(patches)} patches found.")
 
-                # 2. Item
-                masked_item_logits = apply_mask_to_logits(item_logits.view(-1), item_mask[action_idx])
-                item_idx = torch.argmax(masked_item_logits).item()
+        except Exception as e:
+            print(f"Error during setup: {e}")
+            time.sleep(5)
+            continue
 
-                # 3. Rotation
-                rotation_idx = torch.argmax(rotation_logits).item()
+        # --- GAMEPLAY PHASE ---
+        obs = env.reset()
+        if obs is None: continue
 
-                # 4. Heatmap
-                masked_map_logits = apply_mask_to_logits(heatmap_logits.view(-1), space_mask[action_idx])
-                flat_max_idx = torch.argmax(masked_map_logits)
-                y_grid_idx = (flat_max_idx // 17).item()
-                x_grid_idx = (flat_max_idx % 17).item()
+        # Reset Hidden State
+        hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
+                        torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
 
-            # Normalize 0..16 grid to -1.0..1.0
-            x_norm = -1.0 + (x_grid_idx / 16.0) * 2.0
-            y_norm = -1.0 + (y_grid_idx / 16.0) * 2.0
+        total_reward = 0
 
-            # D. Step Environment
-            observation, reward, done, info = env.step(action_idx, item_idx, rotation_idx, x_norm, y_norm)
+        # We use a progress bar to show steps, but we don't really care about 'training' speed
+        with tqdm(range(cfg.MAX_TIMESTEPS), desc=f"Playing {TARGET_SAVE}", unit="step") as pbar:
+            for t in pbar:
+                # 1. Get Obs
+                if t > 0:
+                    obs = env.get_observation()
 
-            # Print reward for debugging
-            if cfg.VERBOSE or reward != 0:
-                print(f"[Step {step}] Reward: {reward:.4f}")
+                node_feats, H = obs
+                node_feats = node_feats.to(device)
+                H = H.to(device)
 
-            if done:
-                print("Goal Reached!")
-                break
+                # 2. Update Masks
+                # This mirrors the training logic exactly to ensure the bot sees the world correctly
+                raw_entities = env._last_raw_entities
+                raw_player = env._last_raw_player
+                inventory = {item.get('name'): item.get('count', 0) for item in raw_player.get('inventory', [])}
+                bounds = env.current_bounds
 
-    except KeyboardInterrupt:
-        print("\nStopping manually...")
-    except Exception as e:
-        print(f"Error in main loop: {e}")
-        traceback.print_exc()
-    finally:
+                # Check research for available items
+                research = env.receiver.scan_research()
+                valid_items = get_available_items(research)
+
+                masks = get_action_masks(
+                    entities=raw_entities,
+                    player_info=raw_player,
+                    inventory=inventory,
+                    available_items=valid_items,
+                    bounds=bounds,
+                    patches=patches,
+                    move_state=env.move_state
+                )
+
+                # 3. Select Action
+                act, item, rot, map_idx, next_hidden = select_action(
+                    model, node_feats, H, hidden_state, epsilon_inference, device, masks
+                )
+
+                hidden_state = next_hidden
+
+                # Convert Coords
+                y_grid = map_idx // 17
+                x_grid = map_idx % 17
+                x_norm = -1.0 + (x_grid / 16.0) * 2.0
+                y_norm = -1.0 + (y_grid / 16.0) * 2.0
+
+                # 4. Step
+                next_obs, reward, done, _ = env.step(act, item, rot, x_norm, y_norm)
+                total_reward += reward
+
+                pbar.set_postfix(Reward=f"{total_reward:.1f}", LastAct=act)
+
+                if done:
+                    print(f"\nEpisode finished. Total Reward: {total_reward}")
+                    break
+
         env.close()
-        print("Run finished.")
+        print("Moving to next map...")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        play()
+    except KeyboardInterrupt:
+        print("\nExiting...")
+    except Exception as e:
+        print(f"Fatal Error: {e}")
+        traceback.print_exc()

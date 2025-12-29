@@ -179,11 +179,11 @@ class FactorioEnv:
             # We ALWAYS execute these, even if moving.
             should_send_rcon = True
 
-            # Note: We do NOT set move_state['active'] to False.
-            # The character will attempt to perform the action while walking.
-            # Factorio allows shooting/building while running.
+            # Note: We do NOT set move_state['active'] to False
+            # The character will attempt to perform the action while walking
+            # Factorio allows shooting/building while running
 
-        # --- 2. Execute RCON ---
+        # send rcon command if needed
         if should_send_rcon:
             log_msg = translateGNNtoFactorio(
                 final_x, final_y, action_idx, item_idx, rotation_idx, self.receiver, verbose=self.cfg.VERBOSE
@@ -220,59 +220,52 @@ class FactorioEnv:
             reward -= 0.2
 
         # --- B. Idle Punishment Logic ---
-        # We only punish if:
-        # 1. Action is MOVE (idx 0) AND we are NOT moving (move_state inactive) -> Lazy
-        # 2. We are not doing any other action (idx != 0)
-
         is_doing_something_useful = False
 
         if action_idx != 0:
-            # We are crafting/building/mining
             is_doing_something_useful = True
         elif action_idx == 0 and self.move_state['active']:
-            # We are traveling
             is_doing_something_useful = True
 
         if is_doing_something_useful:
             self.steps_without_action = 0
         else:
-            # We are truly doing nothing.
             self.steps_without_action += 1
             if self.steps_without_action > 5:
                 reward -= 0.5
 
-            # --- C. Crafting Reward ---
-            if action_idx == 2:  # craft action
+        # --- C. Crafting Reward (Modified with Hard Cap) ---
+        if action_idx == 2:  # craft action
+            # HARD CAP: 500 items.
+            # After 500, the reward drops to 0, forcing the agent to Automate.
+            if self.successful_crafts < 500:
                 alpha = 0.1  # decay rate
-                k = 5.0      # base reward
+                k = 5.0  # base reward
                 reward += k / (1 + alpha * self.successful_crafts)
                 self.successful_crafts += 1
+            else:
+                # Optional: You can add a small negative here if you want to
+                # aggressively discourage hand-crafting late game, but 0 is usually safer.
+                pass
 
-        # --- D. Production Score (Anti-Hacking) ---
+                # --- D. Production Score (Anti-Hacking) ---
         current_total_production = 0
         for e in self._last_raw_entities:
-            # entities are dicts, check if they have product info
-            # Note: Because we cannot change Lua (Point 4), we sum the local counters
             current_total_production += int(e.get('products_finished', 0))
 
-        # Only reward if we break the GLOBAL record for this run
         if current_total_production > self.max_total_production_seen:
             prod_delta = current_total_production - self.max_total_production_seen
             reward += (prod_delta * 1.0)
             self.max_total_production_seen = current_total_production
 
-        # If we mined a building, current_total_production drops, but max_seen stays high.
-        # Rebuilding it starts from 0, so we get NO reward until it surpasses previous levels.
-        # This fixes the exploit.
-
-        # --- C. Connectivity / Edges ---
-        alpha = 0.1  # decay rate
-        k = 5.0     # base reward
+        # --- E. Connectivity / Edges ---
+        alpha = 0.1
+        k = 5.0
         if self._current_edge_count > self.max_edges_seen:
             diff = self._current_edge_count - self.max_edges_seen
             for i in range(diff):
                 n = self.max_edges_seen + i
-                reward += k / (1 + alpha * n)  # diminishing reward
+                reward += k / (1 + alpha * n)
             self.max_edges_seen = self._current_edge_count
 
         # --- F. Milestones ---
