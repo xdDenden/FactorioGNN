@@ -715,9 +715,9 @@ script.on_event(defines.events.on_tick, function(event)
             local diff_y = math.abs(char_y - target.y)
 
             --arrived at location?
-            if diff_x <= 1 and diff_y <= 1 then
+            if diff_x <= 0.5 and diff_y <= 0.5 then
                 moving_characters[id] = nil
-                character.teleport({x = target.x + 0.5, y = target.y + 0.5})
+                --character.teleport({x = target.x + 0.5, y = target.y + 0.5})
                 character.walking_state = {walking = false}
                 game.print("arrived at position")
 
@@ -725,14 +725,14 @@ script.on_event(defines.events.on_tick, function(event)
                 local direction
 
                 --X
-                if diff_x > 1 then
+                if diff_x > 0.5 then
                     if target.x < char_x then
                         direction = defines.direction.west
                     else
                         direction = defines.direction.east
                     end
                 --Y
-                elseif diff_y > 1 then
+                elseif diff_y > 0.5 then
                     if target.y < char_y then
                         direction = defines.direction.north
                     else

@@ -205,10 +205,10 @@ class Rcon_reciever:
         time.sleep(1.0)
         #starting times
         #slightly more items then vanilla to account for jimbo's "inefficiencies" :3
-        self.give(21,10)
-        self.give(25,5)
-        self.give(46,50)
-        self.give(32,10)
+        self.give(20,10)
+        self.give(24,5)
+        self.give(45,50)
+        self.give(31,10)
 
 
     def scan_ore(self) -> List[Dict[str, Any]]:
