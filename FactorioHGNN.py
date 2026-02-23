@@ -1,4 +1,5 @@
 import math
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -354,3 +355,4 @@ class FactorioHGNN(nn.Module):
             heatmap_logits = heatmap_logits.squeeze(0)
 
         return action_logits, item_logits, rotation_logits, heatmap_logits, next_hidden_state
+

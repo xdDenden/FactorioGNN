@@ -200,7 +200,7 @@ def create_factorio_graphml(nodes: List[Dict[str, Any]], edges: List[Dict[str, A
     print(f"Success! Created '{file_name}' with {len(nodes)} nodes and {len(edges)} edges.")
 
 
-# --- MAIN EXECUTION ---
+# MAIN EXECUTION
 if __name__ == "__main__":
     # 1. Setup Connection
     # Uses default host="localhost", port=27015, password="eenie7Uphohpaim" from rcon_bridge.py

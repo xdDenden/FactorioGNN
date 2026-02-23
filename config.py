@@ -9,7 +9,7 @@ class Config:
     RCON_PASSWORD: str = "eenie7Uphohpaim"
 
     # BATCH & BURST SETTINGS
-    COLLECTION_STEPS: int = 2048  # Play this many steps (~2 seconds at 60fps)
+    COLLECTION_STEPS: int = 1024  # Play this many steps
     TRAIN_EPOCHS: int = 512  # Then train this many times back-to-back
     
     # RL / Training Settings

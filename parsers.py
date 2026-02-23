@@ -6,8 +6,8 @@ from typing import Dict, Callable, List, Optional, Any
 @dataclass
 class Entity:
     type: str
-    x: int
-    y: int
+    x: float
+    y: float
 
 @dataclass
 class Resource(Entity):
