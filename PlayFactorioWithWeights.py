@@ -15,14 +15,17 @@ import docker
 import timeit
 
 from OrePatchDetector import OrePatchDetector
-from config import Config
+from RunConfig import Config
 from environment import FactorioEnv
 from FactorioHGNN import FactorioHGNN
 from mappings import get_available_items
 from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
 from ActionMasking import get_action_masks
 
-# --- Cross-Platform Parameters ---
+"""
+This is deprecated and outdated for the moment. Once this file gets brought inline with the others we will rewrite it.
+Renaming from main to PlayFactorioWithWeights to actually reflect what this script is supposed to do.
+"""
 
 # 1. Define Defaults based on OS
 if sys.platform.startswith("win"):
@@ -188,7 +191,7 @@ def play():
             time.sleep(10)  # Wait for boot
 
             # Ore Scanning
-            receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
+            receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", w27015)
             ore_map = receiver_ore.scan_ore()
             time.sleep(2)
 

@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 import factorio_rcon
 from typing import TypedDict, Any, List
 
-import config
+import RunConfig
 
 HOST = "localhost"
 PORT = 27015

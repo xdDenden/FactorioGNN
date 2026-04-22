@@ -11,10 +11,10 @@ import os
 import traceback
 import json
 import docker
-
-
+import Actor
+import RunConfig
+from RunConfig import *
 from OrePatchDetector import OrePatchDetector
-from config import Config
 from environment import FactorioEnv
 from FactorioHGNN import FactorioHGNN
 from mappings import get_available_items
@@ -22,6 +22,7 @@ from plotting import TrainingLogger
 from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
 from ActionMasking import get_action_masks
 import timeit
+import torch.multiprocessing as mp
 
 # --- Hyperparameters ---
 GAMMA = 0.99  # Discount factor for future rewards
@@ -235,7 +236,176 @@ class MapScheduler:
 
 
     #main training loop
-def train(resume_path=None):
+
+
+# ==========================================
+# 1. THE ACTOR LOOP (Runs in multiple processes)
+# ==========================================
+def actor_loop(agent_id, shared_policy, exp_queue, device, cfg):
+    print(f"[Actor {agent_id}] Booting up on {device}...")
+
+    # Each actor gets its own map scheduler
+    map_scheduler = MapScheduler(SAVES_POOL)
+    actor = Actor.ActorWorker(agent_id)
+
+    while True:
+        try:
+            # Fix: Get the map path directly from the scheduler
+            target_save = map_scheduler.get_next_map()
+            map_source_path = os.path.join(SAVES_POOL, target_save)
+
+            # Prepare independent save folder and get patches
+            patches = actor.prepare_map_and_ores(map_source_path)
+
+            obs = actor.env.reset()
+            if obs is None: continue
+
+            # Grab the patches for this specific agent's map
+            patches = actor.env.current_patches
+
+            hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
+                            torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
+
+            # Delete the old 'actor_list' artifact here.
+
+            for t in range(cfg.MAX_TIMESTEPS):
+                if t > 0:
+                    obs = actor.env.get_observation()
+
+                node_feats, H = obs
+                node_feats, H = node_feats.to(device), H.to(device)
+
+                # Get masks (using your existing logic)
+                raw_entities = actor.env._last_raw_entities
+                raw_player = actor.env._last_raw_player
+                inv_list = raw_player.get('inventory', [])
+                inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
+                valid_items = get_available_items(actor.env.receiver.scan_research())
+
+                masks = get_action_masks(
+                    entities=raw_entities, player_info=raw_player, inventory=inventory,
+                    available_items=valid_items, bounds=actor.env.current_bounds,
+                    patches=patches, move_state=actor.env.move_state
+                )
+
+                # Epsilon calculation (can be tied to a shared counter later, fixed for now)
+                epsilon = max(EPSILON_END, EPSILON_START - (EPSILON_START - EPSILON_END) * (t / EPSILON_DECAY))
+
+                # Select action using SHARED policy
+                act, item, rot, map_idx, next_hidden = select_action(
+                    shared_policy, node_feats, H, hidden_state, epsilon, device, masks
+                )
+
+                # Env Step
+                y_grid = map_idx // 17
+                x_grid = map_idx % 17
+                x_norm = -1.0 + (x_grid / 16.0) * 2.0
+                y_norm = -1.0 + (y_grid / 16.0) * 2.0
+
+                next_obs, reward, done, _ = actor.env.step(act, item, rot, x_norm, y_norm)
+
+                # --- STRICT CPU SERIALIZATION ---
+                if next_obs is not None:
+                    s_nodes_cpu = node_feats.detach().cpu()
+                    s_H_cpu = H.detach().cpu()
+                    ns_nodes_cpu = next_obs[0].detach().cpu()
+                    ns_H_cpu = next_obs[1].detach().cpu()
+
+                    action_tuple = (act, item, rot, map_idx)
+
+                    # Push to shared queue
+                    exp_queue.put((
+                        (s_nodes_cpu, s_H_cpu), action_tuple, reward, (ns_nodes_cpu, ns_H_cpu), done
+                    ))
+
+                    hidden_state = next_hidden
+
+                if done:
+                    break
+
+        except Exception as e:
+            print(f"[Actor {agent_id}] Crashed: {e}. Restarting environment...")
+            time.sleep(5)
+
+
+def learner_loop(shared_policy, exp_queue, device, cfg):
+    print(f"[Learner] Starting up on {device}...")
+
+    target_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
+    target_net.load_state_dict(shared_policy.state_dict())
+    target_net.eval()
+
+    optimizer = optim.Adam(shared_policy.parameters(), lr=LR)
+    criterion = nn.MSELoss()
+    memory = ReplayBuffer(BUFFER_SIZE)
+
+    # Fix: Initialize updates_done
+    updates_done = 0
+
+    MIN_BUFFER_SIZE = BATCH_SIZE * 5
+
+    while True:
+        # 1. Drain the queue into Replay Buffer
+        while not exp_queue.empty():
+            memory.push(*exp_queue.get())
+
+        # 2. Train if we have enough data
+        if len(memory) >= MIN_BUFFER_SIZE:
+            transitions = memory.sample(BATCH_SIZE)
+            batch_state, batch_action, batch_reward, batch_next_state, batch_done = zip(*transitions)
+
+            loss_total = 0
+
+            # Variable Graph Size manual batching (from your original logic)
+            for i in range(BATCH_SIZE):
+                s_nodes, s_H = batch_state[i]
+                a_act, a_item, a_rot, a_map = batch_action[i]
+                r = batch_reward[i]
+                ns_nodes, ns_H = batch_next_state[i]
+                d = batch_done[i]
+
+                # Move back to target device for computation
+                s_nodes, s_H = s_nodes.to(device), s_H.to(device)
+                ns_nodes, ns_H = ns_nodes.to(device), ns_H.to(device)
+
+                dummy_h = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
+                           torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
+
+                # Forward passes
+                q_act_v, q_item_v, q_rot_v, q_map_v, _ = shared_policy(s_nodes, s_H, dummy_h)
+
+                with torch.no_grad():
+                    if d:
+                        target_val = r
+                    else:
+                        nq_act, nq_item, nq_rot, nq_map, _ = target_net(ns_nodes, ns_H, dummy_h)
+                        max_q = (nq_act.max() + nq_item.max() + nq_rot.max() + nq_map.max()) / 4.0
+                        target_val = r + GAMMA * max_q
+
+                # Compute loss
+                target_tensor = torch.tensor([target_val], device=device)
+                l1 = criterion(q_act_v[0, a_act].unsqueeze(0), target_tensor)
+                l2 = criterion(q_item_v[0, a_item].unsqueeze(0), target_tensor)
+                l3 = criterion(q_rot_v[0, a_rot].unsqueeze(0), target_tensor)
+                l4 = criterion(q_map_v.view(-1)[a_map].unsqueeze(0), target_tensor)
+                loss_total += (l1 + l2 + l3 + l4)
+
+            # Backprop & Update
+            optimizer.zero_grad()
+            (loss_total / BATCH_SIZE).backward()
+
+            # Use gradient clipping if needed to prevent exploding gradients with LSTMs
+            torch.nn.utils.clip_grad_norm_(shared_policy.parameters(), max_norm=1.0)
+
+            optimizer.step()
+            updates_done += 1
+
+            # Update Target Network
+            if updates_done % TARGET_UPDATE == 0:
+                target_net.load_state_dict(shared_policy.state_dict())
+                print(f"[Learner] Target Net updated at {updates_done} steps. Loss: {(loss_total / BATCH_SIZE).item():.4f}")
+
+#def train(resume_path=None):
     cfg = Config()
     env = FactorioEnv(cfg)
     logger = TrainingLogger()
@@ -337,8 +507,8 @@ def train(resume_path=None):
             container.start()
             time.sleep(10) # Wait for Factorio server to boot up
 
-
             receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
+
             ore_map = receiver_ore.scan_ore()
             time.sleep(3)
             # Save as JSON instead of string representation
@@ -649,90 +819,45 @@ def train(resume_path=None):
     env.close()
 
 
-if __name__ == "__main__":
-    # --- CONFIGURATION ---
-    MAX_RETRIES = 3           # Maximum "health"
-    REGAIN_TIME_SEC = 600     # Time in seconds to regain 1 retry (10 mins)
-    RETRY_DELAY = 30          # Wait time after a crash
+if __name__ == '__main__':
+    # Required to safely share CUDA/MPS memory across processes
+    mp.set_start_method('spawn', force=True)
 
-    current_retries = MAX_RETRIES
+    cfg = Config()
 
-    # --- USER SELECTION ---
-    # autosave or new run
-    print("\nSelect Start Mode:")
-    print("0: Resume from AUTOSAVE")
-    print("1: Start NEW training")
-    user_choice = input("Enter selection: ").strip()
-
-    # Determine initial resume state
-    if user_choice == "0":
-        if os.path.exists(AUTOSAVE_PATH):
-            print(">> Selected: RESUME. Will load autosave.pth.")
-            resume_path = AUTOSAVE_PATH
-        else:
-            print(">> Selected: RESUME, but no file found. Switching to NEW.")
-            resume_path = None
-    elif user_choice == "1":
-        print(">> Selected: NEW. Starting fresh (previous autosave will be overwritten).")
-        resume_path = None
+    # Hardware Selection
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
     else:
-        print(f">> Invalid input '{user_choice}'. Defaulting to NEW.")
-        resume_path = None
+        device = torch.device("cpu")
 
-    # --- MAIN RESILIENCE LOOP ---
-    while True:
-        try:
-            # Start the timer for this run
-            start_time = time.time()
+    print(f"Master process starting. Using device: {device}")
 
-            if resume_path:
-                print(f"\n=== STARTING RUN (Resuming) | Retries left: {current_retries}/{MAX_RETRIES} ===")
-            else:
-                print(f"\n=== STARTING RUN (Fresh) | Retries left: {current_retries}/{MAX_RETRIES} ===")
+    # Initialize and SHARE the policy network
+    shared_policy_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
+    shared_policy_net.share_memory()  # <--- Ensures VRAM is accessible by all spawned workers
 
-            # Run training
-            train(resume_path=resume_path)
+    # Multi-process queue for transitions
+    experience_queue = mp.Queue(maxsize=50000)
 
-            # If train completes successfully, break the retry loop
-            print("Training finished successfully.")
-            break
+    # Spawn Actors
+    NUM_ACTORS = 3
+    actor_processes = []
 
-        except KeyboardInterrupt:
-            print("\nStopped by user.")
-            break
-        except Exception as e:
-            # 1. Calculate duration
-            end_time = time.time()
-            duration = end_time - start_time
+    for i in range(NUM_ACTORS):
+        p = mp.Process(target=actor_loop, args=(i, shared_policy_net, experience_queue, device, cfg))
+        p.start()
+        actor_processes.append(p)
 
-            # 2. Regenerate retries based on runtime
-            regained_retries = int(duration // REGAIN_TIME_SEC)
-
-            # Apply regen (capped at MAX)
-            if regained_retries > 0:
-                print(f"\n>> Stable run of {duration:.0f}s. Regained {regained_retries} retry credit(s).")
-
-            current_retries = min(MAX_RETRIES, current_retries + regained_retries)
-
-            # 3. Pay the cost for the crash
-            current_retries -= 1
-
-            print(f"\nCRASH DETECTED: {e}")
-            traceback.print_exc()
-            print(f"Retries remaining: {current_retries}/{MAX_RETRIES}")
-
-            # 4. Check if we are dead
-            if current_retries < 0:
-                print("Max retries exceeded (Ran out of credits). Exiting.")
-                raise e
-
-            # 5. Prepare for restart
-                print(f"Waiting {RETRY_DELAY} seconds before retrying...")
-                time.sleep(RETRY_DELAY)
-
-            # IMPORTANT: Always force resume on retry
-            if os.path.exists(AUTOSAVE_PATH):
-                resume_path = AUTOSAVE_PATH
-            else:
-                # If we crashed before creating the first autosave, we just try fresh again
-                resume_path = None
+    # Start Learner in the main process
+    try:
+        learner_loop(shared_policy_net, experience_queue, device, cfg)
+    except KeyboardInterrupt:
+        print("\nShutting down workers...")
+        for p in actor_processes:
+            p.terminate()
+        for p in actor_processes:
+            p.join()
+        print("Shutdown complete.")
