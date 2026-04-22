@@ -53,9 +53,9 @@ def translateGNNtoFactorio(x, y, action, item, rotation, receiver, verbose) -> s
                 receiver.take(x, y)
             case 6:  # change_recipe
                 if item is not None or not "None":
-                    receiver.change_recipe(x, y, item)
-                else:
-                    full_log += " [FAILED: No recipe specified for changing]"
+                    result = receiver.change_recipe(x, y, item)
+                    if not result:
+                        full_log += " [FAILED: No recipe specified for changing]"
             case _:
                 pass  # No-op for 'none' or unknown
 

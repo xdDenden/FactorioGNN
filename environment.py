@@ -85,7 +85,9 @@ class FactorioEnv:
 
                 print(f"Processed {len(raw_ores)} ore entities into {len(self.patch_nodes)} patch centers.")
 
-            return self.get_observation()
+            obs = self.get_observation()
+            self._last_obs = obs
+            return obs
         except Exception as e:
             print(f"Connection failed: {e}")
             return None
@@ -93,13 +95,19 @@ class FactorioEnv:
     def close(self):
         self.receiver.disconnect()
 
-    def get_observation(self):
+    def get_observation(self, scan_entities=True, char_info=True):
         # 1. Fetch Data
-        raw_entities = self.receiver.scan_entities()
-        raw_player = self.receiver.char_info()
-        self._last_raw_entities = raw_entities
-        self._last_raw_player = raw_player
+        if scan_entities:
+            raw_entities = self.receiver.scan_entities()
+            self._last_raw_entities = raw_entities
+        else:
+            raw_entities = self._last_raw_entities
 
+        if char_info:
+            raw_player = self.receiver.char_info()
+            self._last_raw_player = raw_player
+        else:
+            raw_player = self._last_raw_player
 
         # 2. Parse & Features
         machine_entities = [parse_entity(e['machine_name'], e) for e in raw_entities]
@@ -149,7 +157,6 @@ class FactorioEnv:
     def step(self, action_idx, item_idx, rotation_idx, x_norm, y_norm):
         if not self.current_bounds:
             return None, 0, True, {}
-
         min_x, max_x, min_y, max_y = self.current_bounds
         final_x = unnormalize_coord(x_norm, min_x, max_x)
         final_y = unnormalize_coord(y_norm, min_y, max_y)
@@ -189,7 +196,17 @@ class FactorioEnv:
                 final_x, final_y, action_idx, item_idx, rotation_idx, self.receiver, verbose=self.cfg.VERBOSE
             )
 
-        next_obs = self.get_observation()
+        OBSERVE_ACTIONS = {1, 3, 6}
+        if action_idx in OBSERVE_ACTIONS and "FAILED" not in log_msg:
+            # Full Scan
+            next_obs = self.get_observation(scan_entities=True, char_info=True)
+            self._last_obs = next_obs
+        elif action_idx == 0 and should_send_rcon:
+            #We only do char_info
+            next_obs = self.get_observation(scan_entities=False, char_info=True)
+            self._last_obs = next_obs
+        else:
+            next_obs = self._last_obs
 
         # --- 3. Update Movement State (ALWAYS runs) ---
         # This tracks the movement initiated in previous steps, regardless of what we did this step.

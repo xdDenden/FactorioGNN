@@ -21,6 +21,7 @@ from mappings import get_available_items
 from plotting import TrainingLogger
 from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
 from ActionMasking import get_action_masks
+from pathlib import Path
 import timeit
 
 # --- Hyperparameters ---
@@ -38,7 +39,8 @@ AUTOSAVE_PATH = "autosave.pth"
 
 #-- Docker Parameters
 CONTAINER_NAME = "factorio"  # Name of the Factorio Docker container
-SAVE_FOLDER = r"C:\factorio_data\saves" # Path to the saves folder on the host machine
+#SAVE_FOLDER = "/home/hussarar/factorio_data/saves" # Oder wo auch immer dein lokaler Mount liegt
+SAVE_FOLDER = Path.home() / "factorio_data" / "saves"
 SAVES_POOL = "./SAVES_POOL" # Path to the saves we use to test the AI this will be within this project
 UPDATE_INTERVAL_SEC = 5.0  # Update the dashboard JSON every 5 seconds
 STATE_FILE = "dashboard_state.json"
@@ -396,7 +398,7 @@ def train(resume_path=None):
                 # --- Time: Observation Fetch ---
                 t_start = timeit.default_timer()
                 if t > 0:
-                    obs = env.get_observation()
+                    obs = env._last_obs
                 timer.record('obs_fetch', timeit.default_timer() - t_start)
 
                 # --- Time: Preprocessing / To Device ---

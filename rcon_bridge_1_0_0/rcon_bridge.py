@@ -157,12 +157,22 @@ class Rcon_reciever:
         if self.distanceCheck(x, y):
             self._send_command_with_retry(f"/take {x} {y} ")
 
-    def change_recipe(self,x: float, y: float, itemIndex: int) -> None:
-        if self.distanceCheck(x, y):
-            self._send_command_with_retry(f"/c_recipe {x} {y} {itemIndex} ")
+    def change_recipe(self, x: float, y: float, itemIndex: int) -> bool:
+        if not self.distanceCheck(x, y):
+            if config.Config.VERBOSE:
+                print(f"Change Recipe failed at ({x}, {y}).")
+            return False
+        message = self._send_command_with_retry(f"/c_recipe {x} {y} {itemIndex} ")
+        if "ERROR" in message or "FAILED" in message:
+            if config.Config.VERBOSE:
+                print(f"Change Recipe Error: {message}")
+            return False
+        else:
+            if config.Config.VERBOSE:
+                print(f"Recipe Change Success: {message}")
+            return True
 
     def build(self, x: float, y: float, buildingIndex: int, rotation: int) -> bool:
-        # 1. check distance
         if not self.distanceCheck(x, y):
             if config.Config.VERBOSE:
                 print(f"Build failed: Target ({x}, {y}) is too far away.")
@@ -170,12 +180,13 @@ class Rcon_reciever:
 
         message = self._send_command_with_retry(f"/build {x} {y} {buildingIndex} {rotation} ")
 
-        # 3. ONLY receive if we actually sent the command
-        if "ERROR" or "FAILED" in message:
+        if "ERROR" in message or "FAILED" in message:
             if config.Config.VERBOSE:
-                print(f"Build Error from server: {message}")
+                print(f"Build Error: {message}")
             return False
         else:
+            if config.Config.VERBOSE:
+                print(f"Build Success: {message}")
             return True
 
     def distanceCheck(self, x2: float, y2: float) -> bool:

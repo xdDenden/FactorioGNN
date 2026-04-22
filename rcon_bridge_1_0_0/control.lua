@@ -2,6 +2,7 @@
 local json = require("json")
 
 local function scan_entities()
+    game.print("SCAN")
     local entities_list = {}
     local surface = game.surfaces[1]
     
@@ -691,7 +692,7 @@ commands.add_command("moveto", "", function(event)
             target = {x = target_x, y = target_y}
         }
 
-        game.print("char walks to: " .. target_x .. ", " .. target_y)
+        game.print("Char walks to: " .. target_x .. ", " .. target_y)
     end
 end)
 
@@ -719,7 +720,7 @@ script.on_event(defines.events.on_tick, function(event)
                 moving_characters[id] = nil
                 --character.teleport({x = target.x + 0.5, y = target.y + 0.5})
                 character.walking_state = {walking = false}
-                game.print("arrived at position")
+                game.print("Arrived at position")
 
             else
                 local direction
@@ -834,9 +835,9 @@ commands.add_command("craft", "", function(event)
     local crafted = character.begin_crafting{recipe = recipe_name, count = count}
 
     if crafted > 0 then
-        game.print("char crafts " .. crafted .. "x " .. recipe_name)
+        game.print("Char crafts " .. crafted .. "x " .. recipe_name)
     else
-        game.print("no materials")
+        game.print("No materials")
     end
 end)
 
@@ -929,12 +930,12 @@ commands.add_command("insert_into", "AI Character inserts items into machine: /i
     -- Prüfe ob Character das Item hat
     if character.get_item_count(item_name) == "none"
     then
-        game.print("char has no " .. item_name .. "!")
+        game.print("Char has no " .. item_name .. "!")
         return
     end
     local item_count = character.get_item_count(item_name)
     if item_count < count then
-        game.print("char has " .. item_count .. "x " .. item_name .. "!")
+        game.print("Char has " .. item_count .. "x " .. item_name .. "!")
         return
     end
 
@@ -945,7 +946,7 @@ commands.add_command("insert_into", "AI Character inserts items into machine: /i
     }
 
     if #entities == 0 then
-        game.print("no machine found at (" .. x .. ", " .. y .. ")")
+        game.print("(INSERT_INTO)No machine found at (" .. x .. ", " .. y .. ")")
         return
     end
 
@@ -990,9 +991,9 @@ commands.add_command("insert_into", "AI Character inserts items into machine: /i
     if inserted > 0 then
         -- Entferne Items aus Character Inventar
         character.remove_item{name = item_name, count = inserted}
-        game.print("char has " .. inserted .. "x " .. item_name .. " in " .. machine.name .. " inserted")
+        game.print("Char has " .. inserted .. "x " .. item_name .. " in " .. machine.name .. " inserted")
     else
-        game.print("insertfailed")
+        game.print("Insert failed")
     end
 end)
 
@@ -1037,7 +1038,7 @@ commands.add_command("c_recipe", "Set recipe in machine: /c_recipe <x> <y> <reci
     }
 
     if #entities == 0 then
-        game.print("No Assembling Machine found at (" .. x .. ", " .. y .. ")")
+        game.print("(CHANGE_RECIPE)No machine found at (" .. x .. ", " .. y .. ")")
         return
     end
 
@@ -1086,7 +1087,7 @@ commands.add_command("take", "Take items from machine: /take <x> <y>", function(
     }
 
     if #entities == 0 then
-        game.print("No machine at (" .. x .. ", " .. y .. ") found!")
+        game.print("(TAKE)No machine at (" .. x .. ", " .. y .. ") found!")
         return
     end
 
