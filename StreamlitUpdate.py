@@ -22,7 +22,7 @@ placeholder = st.empty()
 
 while True:
     with placeholder.container():
-        st.title("🤖 Factorio AI Live Dashboard")
+        st.title("Factorio AI Dashboard")
 
         # 1. Read Live State
         state = None
@@ -34,7 +34,7 @@ while True:
                 pass  # JSON is currently being written by the other script
 
         if state:
-            st.header("🎮 Current Run Info")
+            st.header("Current Run Info")
 
             # Top row metrics
             c1, c2, c3, c4 = st.columns(4)
@@ -46,7 +46,7 @@ while True:
             c4.metric("Total Reward", state.get("total_reward", 0))
 
             # Timing Metrics
-            st.subheader("⏱️ Timing & Performance")
+            st.subheader("Timing & Performance")
             t1, t2, t3, t4, t5 = st.columns(5)
             t1.metric("Iterations / Sec", state.get("it_per_sec", 0))
             t2.metric("Elapsed (Episode)", format_time(state.get("elapsed_episode", 0)))
@@ -60,22 +60,22 @@ while True:
             col1, col2 = st.columns(2)
 
             with col1:
-                st.subheader("📊 Timing Report (Cumulative)")
+                st.subheader("Timing Report (Cumulative)")
                 timing = state.get("timing_report", {})
                 st.dataframe(pd.DataFrame(list(timing.items()), columns=["Task", "Seconds Spend"]),
                              use_container_width=True)
 
             with col2:
-                st.subheader("⚙️ Hyperparameters")
+                st.subheader("Hyperparameters")
                 with st.expander("View Config Variables"):
                     st.json(state.get("hyperparameters", {}))
         else:
-            st.warning("Waiting for AI script to generate live data...")
+            st.warning("Waiting for live data from the Agent...")
 
         st.divider()
 
         # 2. Historical Training Data
-        st.header("📈 Training CSV Log")
+        st.header("Training CSV Log")
         if os.path.exists(CSV_FILE):
             try:
                 df = pd.read_csv(CSV_FILE)
