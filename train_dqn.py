@@ -38,11 +38,11 @@ AUTOSAVE_PATH = "autosave.pth"
 
 #-- Docker Parameters
 CONTAINER_NAME = "factorio"  # Name of the Factorio Docker container
-SAVE_FOLDER = r"C:\factorio_data\saves" # Path to the saves folder on the host machine
+SAVE_FOLDER = os.path.join(".", "factorio_data", "saves") # Path to the saves folder on the host machine
 SAVES_POOL = "./SAVES_POOL" # Path to the saves we use to test the AI this will be within this project
 UPDATE_INTERVAL_SEC = 5.0  # Update the dashboard JSON every 5 seconds
 STATE_FILE = "dashboard_state.json"
-
+os.makedirs(SAVE_FOLDER, exist_ok=True)
 
 class TimingTracker:
     """Tracks timing statistics for different operations."""
@@ -570,7 +570,6 @@ def train(resume_path=None):
                     train=f"{timer.last.get('train_backward', 0)*1000:.0f}ms"
                 )
 
-                # === TIMING REPORT EVERY 1000 STEPS ===
                 # === TIMING REPORT EVERY 1000 STEPS ===
                 if steps_since_report >= 1000:
                     timer.print_report(steps_since_report)

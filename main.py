@@ -7,6 +7,8 @@ import random
 from collections import deque, defaultdict
 from tqdm import tqdm
 import os
+import sys
+from pathlib import Path
 import traceback
 import json
 import docker
@@ -20,23 +22,43 @@ from mappings import get_available_items
 from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
 from ActionMasking import get_action_masks
 
-# --- Parameters ---
-WEIGHTS_PATH = "jimbo_dqn_weights.pth"  # Path to trained model
-CONTAINER_NAME = "factorio"
-SAVE_FOLDER = r"C:\factorio_data\saves"
-SAVES_POOL = "./SAVES_POOL"
-epsilon_inference = 0.02  # Very low noise to prevent getting stuck in infinite loops
+# --- Cross-Platform Parameters ---
 
+# 1. Define Defaults based on OS
+if sys.platform.startswith("win"):
+    base_save_path = Path(r"C:\factorio_data\saves")
+else:
+    # On Mac/Linux, use the user's home directory to avoid permission errors
+    # Result: /Users/yourname/factorio_data/saves
+    base_save_path = Path.home() / "factorio_data" / "saves"
+
+# 2. Setup Paths (using pathlib for slash consistency)
+WEIGHTS_PATH = Path("jimbo_dqn_weights.pth")
+CONTAINER_NAME = "factorio"
+SAVE_FOLDER = base_save_path
+SAVES_POOL = Path("./SAVES_POOL").resolve() # .resolve() makes it absolute
+
+epsilon_inference = 0.02
+
+# 3. Sanity Checks
+if not SAVE_FOLDER.exists():
+    try:
+        SAVE_FOLDER.mkdir(parents=True, exist_ok=True)
+        print(f"Created missing save directory: {SAVE_FOLDER}")
+    except PermissionError:
+        print(f"CRITICAL: Cannot create {SAVE_FOLDER}. Check permissions or run with sudo.")
+        sys.exit(1)
 
 class MapScheduler:
     def __init__(self, pool_path):
-        self.pool_path = pool_path
+        self.pool_path = Path(pool_path)
         self.queue = []
 
     def get_next_map(self):
         if not self.queue:
             print("Map queue empty. Refilling and shuffling...")
-            self.queue = [f for f in os.listdir(self.pool_path) if f.endswith('.zip')]
+            # Use pathlib glob/iterdir
+            self.queue = [f.name for f in self.pool_path.iterdir() if f.suffix == '.zip']
             random.shuffle(self.queue)
         return self.queue.pop()
 
@@ -77,7 +99,7 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
         return act, item, rot, heatmap_idx, h_next
 
     else:
-        # --- MASKED GREEDY ---
+        # MASKED GREEDY
         with torch.no_grad():
             q_act, q_item, q_rot, q_map, h_next = model(node_feats, H, hidden_state)
 
@@ -101,7 +123,6 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
 
 def play():
     cfg = Config()
-    # Force verbose to true to see what the bot is doing
     Config.VERBOSE = True
 
     env = FactorioEnv(cfg)
@@ -114,13 +135,13 @@ def play():
     else:
         device = torch.device("cpu")
     print(f"Inference running on {device}")
+    print(f"Paths Configured -> Saves: {SAVE_FOLDER} | Pool: {SAVES_POOL}")
 
     # 2. Load Model
     model = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
 
-    if os.path.exists(WEIGHTS_PATH):
+    if WEIGHTS_PATH.exists():
         print(f"Loading weights from {WEIGHTS_PATH}...")
-        # map_location ensures weights load to the correct device
         model.load_state_dict(torch.load(WEIGHTS_PATH, map_location=device, weights_only=True))
     else:
         print(f"CRITICAL: Weights file {WEIGHTS_PATH} not found!")
@@ -149,22 +170,24 @@ def play():
             container.stop()
             time.sleep(2)
 
-            # Clean saves
-            for item in os.listdir(SAVE_FOLDER):
-                item_path = os.path.join(SAVE_FOLDER, item)
-                if os.path.isfile(item_path):
-                    os.remove(item_path)
-                elif os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
+            # Clean saves (Cross-platform way)
+            # Iterate over the SAVE_FOLDER using pathlib
+            for item in SAVE_FOLDER.iterdir():
+                if item.is_file():
+                    item.unlink() # Delete file
+                elif item.is_dir():
+                    shutil.rmtree(item) # Delete dir
 
             # Copy new save
-            shutil.copy2(os.path.join(SAVES_POOL, TARGET_SAVE), os.path.join(SAVE_FOLDER, TARGET_SAVE))
+            source_file = SAVES_POOL / TARGET_SAVE
+            dest_file = SAVE_FOLDER / TARGET_SAVE
+            shutil.copy2(source_file, dest_file)
 
             container.start()
             print("Server starting...")
             time.sleep(10)  # Wait for boot
 
-            # Ore Scanning (Crucial for ActionMasking)
+            # Ore Scanning
             receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
             ore_map = receiver_ore.scan_ore()
             time.sleep(2)
@@ -176,6 +199,7 @@ def play():
 
         except Exception as e:
             print(f"Error during setup: {e}")
+            traceback.print_exc()
             time.sleep(5)
             continue
 
@@ -183,16 +207,13 @@ def play():
         obs = env.reset()
         if obs is None: continue
 
-        # Reset Hidden State
         hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
                         torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
 
         total_reward = 0
 
-        # We use a progress bar to show steps, but we don't really care about 'training' speed
         with tqdm(range(cfg.MAX_TIMESTEPS), desc=f"Playing {TARGET_SAVE}", unit="step") as pbar:
             for t in pbar:
-                # 1. Get Obs
                 if t > 0:
                     obs = env.get_observation()
 
@@ -200,14 +221,11 @@ def play():
                 node_feats = node_feats.to(device)
                 H = H.to(device)
 
-                # 2. Update Masks
-                # This mirrors the training logic exactly to ensure the bot sees the world correctly
+                # Update Masks
                 raw_entities = env._last_raw_entities
                 raw_player = env._last_raw_player
                 inventory = {item.get('name'): item.get('count', 0) for item in raw_player.get('inventory', [])}
                 bounds = env.current_bounds
-
-                # Check research for available items
                 research = env.receiver.scan_research()
                 valid_items = get_available_items(research)
 
@@ -221,7 +239,6 @@ def play():
                     move_state=env.move_state
                 )
 
-                # 3. Select Action
                 act, item, rot, map_idx, next_hidden = select_action(
                     model, node_feats, H, hidden_state, epsilon_inference, device, masks
                 )
@@ -234,7 +251,6 @@ def play():
                 x_norm = -1.0 + (x_grid / 16.0) * 2.0
                 y_norm = -1.0 + (y_grid / 16.0) * 2.0
 
-                # 4. Step
                 next_obs, reward, done, _ = env.step(act, item, rot, x_norm, y_norm)
                 total_reward += reward
 
