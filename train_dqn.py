@@ -40,7 +40,8 @@ AUTOSAVE_PATH = "autosave.pth"
 CONTAINER_NAME = "factorio"  # Name of the Factorio Docker container
 SAVE_FOLDER = r"C:\factorio_data\saves" # Path to the saves folder on the host machine
 SAVES_POOL = "./SAVES_POOL" # Path to the saves we use to test the AI this will be within this project
-
+UPDATE_INTERVAL_SEC = 5.0  # Update the dashboard JSON every 5 seconds
+STATE_FILE = "dashboard_state.json"
 
 
 class TimingTracker:
@@ -179,6 +180,13 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
 
             return act, item, rot, heatmap_idx, h_next
 
+def dump_dashboard_state(state_dict):
+    """Safely write state to JSON so Streamlit can read it."""
+    try:
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state_dict, f)
+    except Exception:
+        pass # Ignore write collisions
 
 def save_checkpoint(path, policy_net, target_net, optimizer, memory, env_steps_done, episode, updates_done):
     """Saves the entire training state."""
@@ -231,6 +239,19 @@ def train(resume_path=None):
     cfg = Config()
     env = FactorioEnv(cfg)
     logger = TrainingLogger()
+
+    # --- DASHBOARD SETUP ---
+    start_time_total = time.time()
+    last_json_update = 0
+
+    # Collect hyperparameters for the dashboard
+    hyperparameters = {k: v for k, v in vars(cfg).items() if not k.startswith('_')}
+    hyperparameters.update({
+        "GAMMA": GAMMA, "LR": LR, "BATCH_SIZE": BATCH_SIZE,
+        "BUFFER_SIZE": BUFFER_SIZE, "EPSILON_START": EPSILON_START,
+        "EPSILON_END": EPSILON_END, "EPSILON_DECAY": EPSILON_DECAY,
+        "TARGET_UPDATE": TARGET_UPDATE, "NUM_EPISODES": NUM_EPISODES
+    })
 
     if torch.backends.mps.is_available():
         device = torch.device("mps")
@@ -364,6 +385,9 @@ def train(resume_path=None):
         episode_loss_accum = 0.0
         episode_train_steps = 0
         last_epsilon = EPSILON_START
+
+        episode_start_time = time.time()  # Added for Dashboard
+
         # === INNER PROGRESS BAR (Steps within Episode) ===
         with tqdm(range(cfg.MAX_TIMESTEPS), desc=f"Ep {episode + 1}", leave=False) as inner_bar:
             for t in inner_bar:
@@ -547,10 +571,43 @@ def train(resume_path=None):
                 )
 
                 # === TIMING REPORT EVERY 1000 STEPS ===
+                # === TIMING REPORT EVERY 1000 STEPS ===
                 if steps_since_report >= 1000:
                     timer.print_report(steps_since_report)
                     timer.reset()
                     steps_since_report = 0
+
+                # === DASHBOARD UPDATE LOGIC ===
+                current_time = time.time()
+                if current_time - last_json_update > UPDATE_INTERVAL_SEC:
+                    elapsed_ep = current_time - episode_start_time
+                    elapsed_tot = current_time - start_time_total
+                    it_per_sec = (t + 1) / elapsed_ep if elapsed_ep > 0 else 0
+
+                    eta_ep = (cfg.MAX_TIMESTEPS - t) / it_per_sec if it_per_sec > 0 else 0
+
+                    # Estimate total remaining time
+                    remaining_eps = NUM_EPISODES - (episode + 1)
+                    completed_eps_fraction = (episode - start_episode) + (t / cfg.MAX_TIMESTEPS)
+                    avg_ep_time = elapsed_tot / completed_eps_fraction if completed_eps_fraction > 0 else 0
+                    eta_total = eta_ep + (remaining_eps * avg_ep_time)
+
+                    state_dict = {
+                        "current_map": TARGET_SAVE,
+                        "episode": episode + 1,
+                        "step": t,
+                        "max_steps": cfg.MAX_TIMESTEPS,
+                        "elapsed_episode": elapsed_ep,
+                        "elapsed_total": elapsed_tot,
+                        "eta_episode": eta_ep,
+                        "eta_total": eta_total,
+                        "it_per_sec": round(it_per_sec, 2),
+                        "total_reward": round(total_reward, 2),
+                        "hyperparameters": hyperparameters,
+                        "timing_report": {name: round(val, 3) for name, val in timer.totals.items()}
+                    }
+                    dump_dashboard_state(state_dict)
+                    last_json_update = current_time
 
                 if done:
                     break
