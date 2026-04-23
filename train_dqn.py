@@ -63,9 +63,9 @@ class TimingTracker:
         self.last = {}
 
     def print_report(self, step_count):
-        tqdm.write("\n" + "="*70)
-        tqdm.write(f"TIMING REPORT (Last {step_count} steps)")
-        tqdm.write("="*70)
+        print("\n" + "="*70)
+        print(f"TIMING REPORT (Last {step_count} steps)")
+        print("="*70)
 
         # Sort by total time descending
         sorted_ops = sorted(self.totals.items(), key=lambda x: -x[1])
@@ -73,12 +73,12 @@ class TimingTracker:
         for name, total in sorted_ops:
             count = self.counts[name]
             avg_ms = (total / count * 1000) if count > 0 else 0
-            tqdm.write(f"  {name:<24}: avg={avg_ms:>8.2f}ms, total={total:>8.2f}s, count={count}")
+            print(f"  {name:<24}: avg={avg_ms:>8.2f}ms, total={total:>8.2f}s, count={count}")
 
         total_time = sum(self.totals.values())
-        tqdm.write("-"*70)
-        tqdm.write(f"  {'TOTAL':<24}: total={total_time:>8.2f}s")
-        tqdm.write("="*70 + "\n")
+        print("-"*70)
+        print(f"  {'TOTAL':<24}: total={total_time:>8.2f}s")
+        print("="*70 + "\n")
 
 
 class ReplayBuffer:
@@ -130,18 +130,12 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
 
         # 1. Select Action from valid indices
         valid_actions = np.nonzero(act_mask)[0]
-        if len(valid_actions) == 0:
-            act = 0 # Fallback to No-Op
-        else:
-            act = random.choice(valid_actions)
+        act = random.choice(valid_actions) if len(valid_actions) > 0 else 0
 
         # 2. Select Item from valid indices FOR THAT ACTION
         # item_mask is [num_actions, num_items]
         valid_items = np.nonzero(item_mask[act])[0]
-        if len(valid_items) == 0:
-            item = 0 # Default/No-Item
-        else:
-            item = random.choice(valid_items)
+        item = random.choice(valid_items) if len(valid_items) > 0 else 0
 
         # 3. Select Rotation (Unmasked for now)
         rot = random.randint(0, 3)
@@ -149,10 +143,7 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
         # 4. Select Heatmap Location from valid indices FOR THAT ACTION
         # space_mask is [num_actions, grid_size]
         valid_locs = np.nonzero(space_mask[act])[0]
-        if len(valid_locs) == 0:
-            heatmap_idx = 0 # Default
-        else:
-            heatmap_idx = random.choice(valid_locs)
+        heatmap_idx = random.choice(valid_locs) if len(valid_locs) > 0 else 0
 
         # Return dummy hidden state
         h_next = (torch.zeros(1, 256).to(device), torch.zeros(1, 256).to(device))
@@ -189,16 +180,15 @@ def dump_dashboard_state(state_dict):
     except Exception:
         pass # Ignore write collisions
 
-def save_checkpoint(path, policy_net, target_net, optimizer, memory, env_steps_done, episode, updates_done):
-    """Saves the entire training state."""
+
+def save_checkpoint(path, policy_net, target_net, optimizer, memory, total_steps_ingested, updates_done):
     print(f"\nSaving autosave to {path}...")
     torch.save({
         'policy_net': policy_net.state_dict(),
         'target_net': target_net.state_dict(),
         'optimizer': optimizer.state_dict(),
-        'memory': memory.buffer,  # Deque is picklable
-        'env_steps_done': env_steps_done,
-        'episode': episode,
+        'memory': memory.buffer,
+        'total_steps_ingested': total_steps_ingested,
         'updates_done': updates_done
     }, path)
     print("Autosave complete.")
@@ -206,7 +196,7 @@ def save_checkpoint(path, policy_net, target_net, optimizer, memory, env_steps_d
 def load_checkpoint(path, policy_net, target_net, optimizer, memory):
     """Loads the training state from a file."""
     if not os.path.exists(path):
-        return 0, 0, 0 # start_episode, env_steps_done, updates_done
+        return 0, 0
 
     print(f"Loading checkpoint from {path}...")
     checkpoint = torch.load(path, weights_only=False)
@@ -215,7 +205,7 @@ def load_checkpoint(path, policy_net, target_net, optimizer, memory):
     optimizer.load_state_dict(checkpoint['optimizer'])
     memory.buffer = checkpoint['memory']
 
-    return checkpoint['episode'], checkpoint['env_steps_done'], checkpoint.get('updates_done', 0)
+    return checkpoint.get('total_steps_ingested', 0), checkpoint.get('updates_done', 0)
 
 
 class MapScheduler:
@@ -244,38 +234,50 @@ class MapScheduler:
 def actor_loop(agent_id, shared_policy, exp_queue, device, cfg):
     print(f"[Actor {agent_id}] Booting up on {device}...")
 
-    # Each actor gets its own map scheduler
     map_scheduler = MapScheduler(SAVES_POOL)
     actor = Actor.ActorWorker(agent_id)
 
+    # --- Local Replica ---
+    # To prevent lock contention, actors infer from a local copy.
+    local_policy = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
+
+    CHUNK_SIZE = 32
+    SYNC_INTERVAL = 128
+
+    # Simple global step counter for epsilon decay
+    actor_steps = 0
+
     while True:
         try:
-            # Fix: Get the map path directly from the scheduler
             target_save = map_scheduler.get_next_map()
             map_source_path = os.path.join(SAVES_POOL, target_save)
 
-            # Prepare independent save folder and get patches
             patches = actor.prepare_map_and_ores(map_source_path)
-
             obs = actor.env.reset()
             if obs is None: continue
 
-            # Grab the patches for this specific agent's map
             patches = actor.env.current_patches
-
             hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
                             torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
 
-            # Delete the old 'actor_list' artifact here.
+            local_buffer = []
+            steps_since_sync = 0
+
+            # Sync weights at the start of every episode
+            local_policy.load_state_dict(shared_policy.state_dict())
 
             for t in range(cfg.MAX_TIMESTEPS):
                 if t > 0:
                     obs = actor.env.get_observation()
 
+                # Sync local weights with Learner periodically
+                if steps_since_sync >= SYNC_INTERVAL:
+                    local_policy.load_state_dict(shared_policy.state_dict())
+                    steps_since_sync = 0
+
                 node_feats, H = obs
                 node_feats, H = node_feats.to(device), H.to(device)
 
-                # Get masks (using your existing logic)
                 raw_entities = actor.env._last_raw_entities
                 raw_player = actor.env._last_raw_player
                 inv_list = raw_player.get('inventory', [])
@@ -288,40 +290,43 @@ def actor_loop(agent_id, shared_policy, exp_queue, device, cfg):
                     patches=patches, move_state=actor.env.move_state
                 )
 
-                # Epsilon calculation (can be tied to a shared counter later, fixed for now)
-                epsilon = max(EPSILON_END, EPSILON_START - (EPSILON_START - EPSILON_END) * (t / EPSILON_DECAY))
+                epsilon = max(EPSILON_END, EPSILON_START - (EPSILON_START - EPSILON_END) * (actor_steps / EPSILON_DECAY))
 
-                # Select action using SHARED policy
+                # Infer from LOCAL policy
                 act, item, rot, map_idx, next_hidden = select_action(
-                    shared_policy, node_feats, H, hidden_state, epsilon, device, masks
+                    local_policy, node_feats, H, hidden_state, epsilon, device, masks
                 )
 
-                # Env Step
-                y_grid = map_idx // 17
-                x_grid = map_idx % 17
-                x_norm = -1.0 + (x_grid / 16.0) * 2.0
-                y_norm = -1.0 + (y_grid / 16.0) * 2.0
+                y_grid, x_grid = map_idx // 17, map_idx % 17
+                x_norm, y_norm = -1.0 + (x_grid / 16.0) * 2.0, -1.0 + (y_grid / 16.0) * 2.0
 
                 next_obs, reward, done, _ = actor.env.step(act, item, rot, x_norm, y_norm)
 
-                # --- STRICT CPU SERIALIZATION ---
                 if next_obs is not None:
-                    s_nodes_cpu = node_feats.detach().cpu()
-                    s_H_cpu = H.detach().cpu()
-                    ns_nodes_cpu = next_obs[0].detach().cpu()
-                    ns_H_cpu = next_obs[1].detach().cpu()
-
+                    s_nodes_cpu, s_H_cpu = node_feats.detach().cpu(), H.detach().cpu()
+                    ns_nodes_cpu, ns_H_cpu = next_obs[0].detach().cpu(), next_obs[1].detach().cpu()
                     action_tuple = (act, item, rot, map_idx)
 
-                    # Push to shared queue
-                    exp_queue.put((
+                    # Append to local chunk buffer
+                    local_buffer.append((
                         (s_nodes_cpu, s_H_cpu), action_tuple, reward, (ns_nodes_cpu, ns_H_cpu), done
                     ))
 
+                    # Push chunk to queue
+                    if len(local_buffer) >= CHUNK_SIZE:
+                        exp_queue.put(local_buffer)
+                        local_buffer = []
+
                     hidden_state = next_hidden
+
+                steps_since_sync += 1
 
                 if done:
                     break
+
+            # Empty remaining buffer at end of episode
+            if len(local_buffer) > 0:
+                exp_queue.put(local_buffer)
 
         except Exception as e:
             print(f"[Actor {agent_id}] Crashed: {e}. Restarting environment...")
@@ -331,23 +336,49 @@ def actor_loop(agent_id, shared_policy, exp_queue, device, cfg):
 def learner_loop(shared_policy, exp_queue, device, cfg):
     print(f"[Learner] Starting up on {device}...")
 
+    # --- GPU Models ---
+    policy_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
+    policy_net.load_state_dict(shared_policy.state_dict())  # Init from CPU
+
     target_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
-    target_net.load_state_dict(shared_policy.state_dict())
+    target_net.load_state_dict(policy_net.state_dict())
     target_net.eval()
 
-    optimizer = optim.Adam(shared_policy.parameters(), lr=LR)
+    optimizer = optim.Adam(policy_net.parameters(), lr=LR)
     criterion = nn.MSELoss()
     memory = ReplayBuffer(BUFFER_SIZE)
+    criterion = nn.MSELoss()
 
-    # Fix: Initialize updates_done
     updates_done = 0
+    total_steps_ingested = 0
+    updates_done = 0
+
+    if os.path.exists(AUTOSAVE_PATH):
+        total_steps_ingested, updates_done = load_checkpoint(AUTOSAVE_PATH, policy_net, target_net, optimizer, memory)
+    else:
+        policy_net.load_state_dict(shared_policy.state_dict())
+        target_net.load_state_dict(policy_net.state_dict())
+
+    target_net.eval()
 
     MIN_BUFFER_SIZE = BATCH_SIZE * 5
 
+    last_json_update = time.time()
+    last_updates_count = updates_done
+    start_time_total = time.time()
+
+    hyperparameters = {k: v for k, v in vars(cfg).items() if not k.startswith('_')}
+
     while True:
-        # 1. Drain the queue into Replay Buffer
+        # 1. Unroll the queue chunks into the Replay Buffer
         while not exp_queue.empty():
-            memory.push(*exp_queue.get())
+            try:
+                chunk = exp_queue.get_nowait()
+                for transition in chunk:
+                    memory.push(*transition)
+                    total_steps_ingested += 1
+            except Exception:
+                break  # Queue empty or busy
 
         # 2. Train if we have enough data
         if len(memory) >= MIN_BUFFER_SIZE:
@@ -356,7 +387,6 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
 
             loss_total = 0
 
-            # Variable Graph Size manual batching (from your original logic)
             for i in range(BATCH_SIZE):
                 s_nodes, s_H = batch_state[i]
                 a_act, a_item, a_rot, a_map = batch_action[i]
@@ -364,15 +394,15 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
                 ns_nodes, ns_H = batch_next_state[i]
                 d = batch_done[i]
 
-                # Move back to target device for computation
+                # Move to GPU
                 s_nodes, s_H = s_nodes.to(device), s_H.to(device)
                 ns_nodes, ns_H = ns_nodes.to(device), ns_H.to(device)
 
                 dummy_h = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
                            torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
 
-                # Forward passes
-                q_act_v, q_item_v, q_rot_v, q_map_v, _ = shared_policy(s_nodes, s_H, dummy_h)
+                # Forward pass on ACTUAL policy net
+                q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(s_nodes, s_H, dummy_h)
 
                 with torch.no_grad():
                     if d:
@@ -382,7 +412,6 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
                         max_q = (nq_act.max() + nq_item.max() + nq_rot.max() + nq_map.max()) / 4.0
                         target_val = r + GAMMA * max_q
 
-                # Compute loss
                 target_tensor = torch.tensor([target_val], device=device)
                 l1 = criterion(q_act_v[0, a_act].unsqueeze(0), target_tensor)
                 l2 = criterion(q_item_v[0, a_item].unsqueeze(0), target_tensor)
@@ -390,474 +419,80 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
                 l4 = criterion(q_map_v.view(-1)[a_map].unsqueeze(0), target_tensor)
                 loss_total += (l1 + l2 + l3 + l4)
 
-            # Backprop & Update
+            # Backprop
             optimizer.zero_grad()
             (loss_total / BATCH_SIZE).backward()
-
-            # Use gradient clipping if needed to prevent exploding gradients with LSTMs
-            torch.nn.utils.clip_grad_norm_(shared_policy.parameters(), max_norm=1.0)
-
+            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
             optimizer.step()
+
             updates_done += 1
+            current_loss = (loss_total / BATCH_SIZE).item()
 
-            # Update Target Network
+            # 3. Target Update & CPU Weight Push
             if updates_done % TARGET_UPDATE == 0:
-                target_net.load_state_dict(shared_policy.state_dict())
-                print(f"[Learner] Target Net updated at {updates_done} steps. Loss: {(loss_total / BATCH_SIZE).item():.4f}")
+                target_net.load_state_dict(policy_net.state_dict())
 
-#def train(resume_path=None):
-    cfg = Config()
-    env = FactorioEnv(cfg)
-    logger = TrainingLogger()
+                # PUSH WEIGHTS TO CPU FOR ACTORS TO PULL
+                shared_policy.load_state_dict({k: v.cpu() for k, v in policy_net.state_dict().items()})
+                print(f"[Learner] Target updated & weights synced to CPU at {updates_done} updates. Loss: {current_loss:.4f}")
 
-    # --- DASHBOARD SETUP ---
-    start_time_total = time.time()
-    last_json_update = 0
-
-    # Collect hyperparameters for the dashboard
-    hyperparameters = {k: v for k, v in vars(cfg).items() if not k.startswith('_')}
-    hyperparameters.update({
-        "GAMMA": GAMMA, "LR": LR, "BATCH_SIZE": BATCH_SIZE,
-        "BUFFER_SIZE": BUFFER_SIZE, "EPSILON_START": EPSILON_START,
-        "EPSILON_END": EPSILON_END, "EPSILON_DECAY": EPSILON_DECAY,
-        "TARGET_UPDATE": TARGET_UPDATE, "NUM_EPISODES": NUM_EPISODES
-    })
-
-    if torch.backends.mps.is_available():
-        device = torch.device("mps")
-    elif torch.cuda.is_available():
-        device = torch.device("cuda")
-    else:
-        device = torch.device("cpu")
-    print(f"Training on {device}")
-
-    # 1. Initialize Networks
-    policy_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
-    target_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
-    target_net.load_state_dict(policy_net.state_dict())
-    target_net.eval()
-
-    optimizer = optim.Adam(policy_net.parameters(), lr=LR)
-    memory = ReplayBuffer(BUFFER_SIZE)
-    criterion = nn.MSELoss()
-
-
-    # Counters
-    env_steps_done = 0
-    updates_done = 0
-    start_episode = 0
-
-    # Resume if requested
-    if resume_path:
-        start_episode, env_steps_done, updates_done = load_checkpoint(
-            resume_path, policy_net, target_net, optimizer, memory
-        )
-        # Check if we are already done
-        if start_episode >= NUM_EPISODES:
-            print("Training already completed in this checkpoint.")
-            return
-
-    steps_since_train = 0
-
-    # Timing
-    timer = TimingTracker()
-    steps_since_report = 0
-
-    # === OUTER PROGRESS BAR (Episodes) ===
-    outer_bar = tqdm(range(start_episode, NUM_EPISODES), desc="Total Progress", unit="ep", initial=start_episode, total=NUM_EPISODES)
-
-    #initalize map scheduler to shuffle maps
-    map_scheduler = MapScheduler(SAVES_POOL)
-
-    for episode in outer_bar:
-
-        # initalize ore map to know what to mine and where
-        # save it to a file for use in ActionMasking
-        # only need to do this once per episode because thats when the map resets
-        # also time between episodes is long enough to not worry about timing this or it slowing down training
-
-        try:
-            # 1. Get the next unique map from our scheduler
-            TARGET_SAVE = map_scheduler.get_next_map()
-            print(f"Next map selected: {TARGET_SAVE}")
-
-            # 2. Docker & Cleanup Logic
-            docker_client = docker.from_env()
-            container = docker_client.containers.get(CONTAINER_NAME)
-
-            print(f"Stopping container: {CONTAINER_NAME}...")
-            container.stop()
-            time.sleep(5)  # Wait for graceful shutdown
-
-            print("Emptying save folder...")
-            # clean out the existing save data
-            for item in os.listdir(SAVE_FOLDER):
-                item_path = os.path.join(SAVE_FOLDER, item)
-                if os.path.isfile(item_path):
-                    os.remove(item_path)
-                elif os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
-
-            # 3. Install the new map
-            source_path = os.path.join(SAVES_POOL, TARGET_SAVE)
-
-            shutil.copy2(source_path, os.path.join(SAVE_FOLDER, TARGET_SAVE))
-
-            print("Restarting container...")
-            container.start()
-            time.sleep(10) # Wait for Factorio server to boot up
-
-            receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)
-
-            ore_map = receiver_ore.scan_ore()
-            time.sleep(3)
-            # Save as JSON instead of string representation
-            with open("ore_map.json", "w") as ore_file:
-                json.dump(ore_map, ore_file)
-            print("Ores scanned")
-            receiver_ore.disconnect()
-
-            # Then process the ores map for use in ActionMasking
-            # The ores will be converted from millions of individual nodes into a smaller number of patches
-            # this is necessary for performance reasons
-            with open("ore_map.json", "r") as f:
-                ore_data = json.load(f)  # This loads it as a proper list of dicts
-
-            detector = OrePatchDetector(ore_data)
-            patches = detector.process_patches()
-
-            with open("patches.json", "w") as patches_file:
-                # Save patches too (without the polygon objects though)
-                patches_serializable = [{k: v for k, v in p.items() if k != 'polygon'} for p in patches]
-                json.dump(patches_serializable, patches_file)
-        except Exception as e:
-            print(f"Error during Ore Scanning/Processing: {e}")
-            # Depending on severity, you might want to continue or crash.
-            # We'll let it crash so the retry logic handles it if RCON fails temporarily.
-            raise e
-
-        #again we will save the patches to a file for use in ActionMasking
-
-        # --- Time: Reset ---
-        t_start = timeit.default_timer()
-        obs = env.reset()
-        timer.record('reset', timeit.default_timer() - t_start)
-
-        if obs is None: continue
-
-        # Reset LSTM hidden state (Batch=1)
-        hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
-                        torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
-
-        total_reward = 0
-        step_times = []
-
-        episode_loss_accum = 0.0
-        episode_train_steps = 0
-        last_epsilon = EPSILON_START
-
-        episode_start_time = time.time()  # Added for Dashboard
-
-        # === INNER PROGRESS BAR (Steps within Episode) ===
-        with tqdm(range(cfg.MAX_TIMESTEPS), desc=f"Ep {episode + 1}", leave=False) as inner_bar:
-            for t in inner_bar:
-                step_start_time = timeit.default_timer()
-
-                # --- Time: Observation Fetch ---
-                t_start = timeit.default_timer()
-                if t > 0:
-                    obs = env.get_observation()
-                timer.record('obs_fetch', timeit.default_timer() - t_start)
-
-                # --- Time: Preprocessing / To Device ---
-                t_start = timeit.default_timer()
-                node_feats, H = obs
-                node_feats = node_feats.to(device)
-                H = H.to(device)
-                timer.record('preproc_to_device', timeit.default_timer() - t_start)
-
-                # 3. Calculate MASKS
-                t_start = timeit.default_timer()
-
-                # Extract state info from env for masking
-                raw_entities = env._last_raw_entities
-                raw_player = env._last_raw_player
-                # Convert inventory list to dict {name: count}
-                inv_list = raw_player.get('inventory', [])
-                inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
-
-                bounds = env.current_bounds
-
-                research = env.receiver.scan_research()
-                valid_items = get_available_items(research)
-                #print(f"Valid items based on research: {valid_items}")
-
-                masks = get_action_masks(
-                    entities=raw_entities,
-                    player_info=raw_player,
-                    inventory=inventory,
-                    available_items=valid_items,
-                    bounds=bounds,
-                    patches=patches,
-                    move_state=env.move_state
-                )
-                timer.record('mask_calc', timeit.default_timer() - t_start)
-
-                # --- DEBUG PRINT (Check once per 100 steps) ---
-                if t % 100 == 0 and Config.VERBOSE==True:
-                    act_mask, item_mask, space_mask = masks
-                    print(f"\n[DEBUG Step {t}] Action Mask: {act_mask}")
-                    #print(f"Inventory: {inventory}")
-                    #DEBUG CRAFTING CHECK
-                   # if act_mask[2] == 1.0:
-                        #print("Crafting is VALID.")
-                    #else:
-                        #print("Crafting is BLOCKED.")
-
-                # --- Time: Action Selection ---
-                t_start = timeit.default_timer()
-                epsilon = EPSILON_END + (EPSILON_START - EPSILON_END) * \
-                          np.exp(-1. * env_steps_done / EPSILON_DECAY)
-                last_epsilon = epsilon
-
-                act, item, rot, map_idx, next_hidden = select_action(
-                    policy_net, node_feats, H, hidden_state, epsilon, device,masks
-                )
-
-                # Convert Heatmap Index -> Norm Coords
-                y_grid = map_idx // 17
-                x_grid = map_idx % 17
-                x_norm = -1.0 + (x_grid / 16.0) * 2.0
-                y_norm = -1.0 + (y_grid / 16.0) * 2.0
-                timer.record('action_select', timeit.default_timer() - t_start)
-
-                # --- Time: Environment Step ---
-                t_start = timeit.default_timer()
-                next_obs, reward, done, _ = env.step(act, item, rot, x_norm, y_norm)
-                timer.record('env_step', timeit.default_timer() - t_start)
-
-                total_reward += reward
-
-                # --- Time: Memory Push ---
-                t_start = timeit.default_timer()
-                if next_obs is not None:
-                    action_tuple = (act, item, rot, map_idx)
-                    memory.push((node_feats.cpu(), H.cpu()), action_tuple, reward,
-                                (next_obs[0].cpu(), next_obs[1].cpu()), done)
-                    hidden_state = next_hidden
-                timer.record('memory_push', timeit.default_timer() - t_start)
-
-                env_steps_done += 1
-                steps_since_train += 1
-                steps_since_report += 1
-
-                # --- 4. BATCH & BURST TRAINING ---
-                loss_val = 0.0
-
-                if len(memory) > BATCH_SIZE and steps_since_train >= cfg.COLLECTION_STEPS:
-
-                    for _ in range(cfg.TRAIN_EPOCHS):
-                        # --- Time: Sample ---
-                        t_start = timeit.default_timer()
-                        transitions = memory.sample(BATCH_SIZE)
-                        batch_state, batch_action, batch_reward, batch_next_state, batch_done = zip(*transitions)
-                        timer.record('train_sample', timeit.default_timer() - t_start)
-
-                        loss_total = 0
-
-                        # Manual Batch Processing (Variable Graph Sizes)
-                        for i in range(BATCH_SIZE):
-                            s_nodes, s_H = batch_state[i]
-                            a_act, a_item, a_rot, a_map = batch_action[i]
-                            r = batch_reward[i]
-                            ns_nodes, ns_H = batch_next_state[i]
-                            d = batch_done[i]
-
-                            # --- Time: To Device ---
-                            t_start = timeit.default_timer()
-                            s_nodes, s_H = s_nodes.to(device), s_H.to(device)
-                            ns_nodes, ns_H = ns_nodes.to(device), ns_H.to(device)
-                            dummy_h = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
-                                       torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
-                            timer.record('train_to_device', timeit.default_timer() - t_start)
-
-                            # --- Time: Forward Policy ---
-                            t_start = timeit.default_timer()
-                            q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(s_nodes, s_H, dummy_h)
-                            timer.record('train_forward_policy', timeit.default_timer() - t_start)
-
-                            # --- Time: Forward Target ---
-                            t_start = timeit.default_timer()
-                            with torch.no_grad():
-                                if d:
-                                    target_val = r
-                                else:
-                                    nq_act, nq_item, nq_rot, nq_map, _ = target_net(ns_nodes, ns_H, dummy_h)
-                                    max_q = (nq_act.max() + nq_item.max() + nq_rot.max() + nq_map.max()) / 4.0
-                                    target_val = r + GAMMA * max_q
-                            timer.record('train_forward_target', timeit.default_timer() - t_start)
-
-                            # --- Time: Loss Compute ---
-                            t_start = timeit.default_timer()
-                            target_tensor = torch.tensor([target_val], device=device)
-                            l1 = criterion(q_act_v[0, a_act].unsqueeze(0), target_tensor)
-                            l2 = criterion(q_item_v[0, a_item].unsqueeze(0), target_tensor)
-                            l3 = criterion(q_rot_v[0, a_rot].unsqueeze(0), target_tensor)
-                            l4 = criterion(q_map_v.view(-1)[a_map].unsqueeze(0), target_tensor)
-                            loss_total += (l1 + l2 + l3 + l4)
-                            timer.record('train_loss_compute', timeit.default_timer() - t_start)
-
-                        # --- Time: Backward ---
-                        t_start = timeit.default_timer()
-                        optimizer.zero_grad()
-                        (loss_total / BATCH_SIZE).backward()
-                        optimizer.step()
-                        timer.record('train_backward', timeit.default_timer() - t_start)
-
-                        loss_val = (loss_total / BATCH_SIZE).item()
-                        updates_done += 1
-
-                        episode_loss_accum += loss_val
-                        episode_train_steps += 1
-
-                        if updates_done % TARGET_UPDATE == 0:
-                            target_net.load_state_dict(policy_net.state_dict())
-                            tqdm.write(f"--> Updated Target Net at update {updates_done}")
-
-                    steps_since_train = 0
-
-                step_end_time = timeit.default_timer()
-                step_duration = step_end_time - step_start_time
-                step_times.append(step_duration)
-
-                # === UPDATE INNER BAR with timing info ===
-                inner_bar.set_postfix(
-                    Rew=f"{total_reward:.1f}",
-                    Eps=f"{epsilon:.2f}",
-                    Loss=f"{loss_val:.2f}",
-                    obs=f"{timer.last.get('obs_fetch', 0)*1000:.1f}ms",
-                    env=f"{timer.last.get('env_step', 0)*1000:.1f}ms",
-                    train=f"{timer.last.get('train_backward', 0)*1000:.0f}ms"
-                )
-
-                # === TIMING REPORT EVERY 1000 STEPS ===
-                if steps_since_report >= 1000:
-                    timer.print_report(steps_since_report)
-                    timer.reset()
-                    steps_since_report = 0
-
-                # === DASHBOARD UPDATE LOGIC ===
+                # Example Dashboard Update / Checkpointing trigger
                 current_time = time.time()
                 if current_time - last_json_update > UPDATE_INTERVAL_SEC:
-                    elapsed_ep = current_time - episode_start_time
                     elapsed_tot = current_time - start_time_total
-                    it_per_sec = (t + 1) / elapsed_ep if elapsed_ep > 0 else 0
-
-                    eta_ep = (cfg.MAX_TIMESTEPS - t) / it_per_sec if it_per_sec > 0 else 0
-
-                    # Estimate total remaining time
-                    remaining_eps = NUM_EPISODES - (episode + 1)
-                    completed_eps_fraction = (episode - start_episode) + (t / cfg.MAX_TIMESTEPS)
-                    avg_ep_time = elapsed_tot / completed_eps_fraction if completed_eps_fraction > 0 else 0
-                    eta_total = eta_ep + (remaining_eps * avg_ep_time)
+                    updates_per_sec = (updates_done - last_updates_count) / (current_time - last_json_update)
 
                     state_dict = {
-                        "current_map": TARGET_SAVE,
-                        "episode": episode + 1,
-                        "step": t,
-                        "max_steps": cfg.MAX_TIMESTEPS,
-                        "elapsed_episode": elapsed_ep,
+                        "steps_ingested": total_steps_ingested,
+                        "updates_done": updates_done,
+                        "buffer_size": len(memory),
+                        "current_loss": round(current_loss, 4),
+                        "updates_per_sec": round(updates_per_sec, 2),
                         "elapsed_total": elapsed_tot,
-                        "eta_episode": eta_ep,
-                        "eta_total": eta_total,
-                        "it_per_sec": round(it_per_sec, 2),
-                        "total_reward": round(total_reward, 2),
-                        "hyperparameters": hyperparameters,
-                        "timing_report": {name: round(val, 3) for name, val in timer.totals.items()}
+                        "hyperparameters": hyperparameters
                     }
                     dump_dashboard_state(state_dict)
+
                     last_json_update = current_time
+                    last_updates_count = updates_done
 
-                if done:
-                    break
-        # === END OF EPISODE LOGGING ===
-        avg_loss = episode_loss_accum / episode_train_steps if episode_train_steps > 0 else 0.0
-
-        logger.log_episode(
-            episode=episode + 1,
-            step_count=env_steps_done,
-            reward=total_reward,
-            avg_loss=avg_loss,
-            epsilon=last_epsilon,
-            max_production=env.max_total_production_seen,
-            max_edges=env.max_edges_seen,
-            milestones=env.milestones
-        )
-        # === UPDATE OUTER BAR (End of episode stats) ===
-        avg_ep_time = np.mean(step_times) if step_times else 0
-        outer_bar.set_postfix(LastRew=f"{total_reward:.1f}", AvgTime=f"{avg_ep_time:.3f}s")
-
-        # === AUTOSAVE ===
-        # Save after every episode, noting that we have finished 'episode' (so next start is episode + 1)
-        save_checkpoint(
-            AUTOSAVE_PATH,
-            policy_net,
-            target_net,
-            optimizer,
-            memory,
-            env_steps_done,
-            episode + 1,
-            updates_done
-        )
-
-    # Final timing report
-    if steps_since_report > 0:
-        timer.print_report(steps_since_report)
-
-    torch.save(policy_net.state_dict(), "jimbo_dqn_weights.pth")
-    print("\nModel saved to jimbo_dqn_weights.pth")
-    env.close()
+                    # Autosave periodically
+                    if updates_done % (TARGET_UPDATE * 10) == 0:
+                        save_checkpoint(AUTOSAVE_PATH, policy_net, target_net, optimizer, memory, total_steps_ingested, updates_done)
 
 
 if __name__ == '__main__':
-    # Required to safely share CUDA/MPS memory across processes
     mp.set_start_method('spawn', force=True)
 
     cfg = Config()
 
-    # Hardware Selection
-    if torch.backends.mps.is_available():
-        device = torch.device("mps")
-    elif torch.cuda.is_available():
-        device = torch.device("cuda")
+    cpu_device = torch.device("cpu")
+    if torch.cuda.is_available():
+        gpu_device = torch.device("cuda")
     else:
-        device = torch.device("cpu")
+        gpu_device = torch.device("cpu")
 
-    print(f"Master process starting. Using device: {device}")
+    print(f"Master process starting. Learner on: {gpu_device}, Actors on: {cpu_device}")
 
-    # Initialize and SHARE the policy network
-    shared_policy_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
-    shared_policy_net.share_memory()  # <--- Ensures VRAM is accessible by all spawned workers
+    shared_policy_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(cpu_device)
+    shared_policy_net.share_memory()
 
-    # Multi-process queue for transitions
-    experience_queue = mp.Queue(maxsize=50000)
+    experience_queue = mp.Queue(maxsize=2000)
 
-    # Spawn Actors
     NUM_ACTORS = 3
     actor_processes = []
 
     for i in range(NUM_ACTORS):
-        p = mp.Process(target=actor_loop, args=(i, shared_policy_net, experience_queue, device, cfg))
+        p = mp.Process(target=actor_loop, args=(i, shared_policy_net, experience_queue, cpu_device, cfg))
         p.start()
         actor_processes.append(p)
 
-    # Start Learner in the main process
-    try:
-        learner_loop(shared_policy_net, experience_queue, device, cfg)
-    except KeyboardInterrupt:
-        print("\nShutting down workers...")
-        for p in actor_processes:
-            p.terminate()
-        for p in actor_processes:
-            p.join()
+        try:
+            learner_loop(shared_policy_net, experience_queue, gpu_device, cfg)
+        except KeyboardInterrupt:
+            print("\nShutting down workers...")
+            for p in actor_processes:
+                p.terminate()
+            for p in actor_processes:
+                p.join()
         print("Shutdown complete.")
