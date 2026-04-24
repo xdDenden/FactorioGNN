@@ -1,4 +1,4 @@
-﻿from rcon_bridge_1_0_0.rcon_bridge import CharInfo
+﻿from rcon_bridge.rcon_bridge import CharInfo
 from typing import Dict, List, Optional, Tuple, Any
 from parsers import Entity  # Import the base Entity class
 from mappings import (

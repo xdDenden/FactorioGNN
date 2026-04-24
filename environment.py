@@ -2,7 +2,7 @@ import json
 import time
 import torch
 import numpy as np
-import rcon_bridge_1_0_0.rcon_bridge as bridge
+import rcon_bridge.rcon_bridge as bridge
 import Edging
 import math
 from parsers import parse_entity, Entity, parse_resource
@@ -75,7 +75,7 @@ class FactorioEnv:
             # 1. Scan Ores ONCE per episode
             raw_ores = self.receiver.scan_ore()
 
-            time.sleep(1.0)
+            time.sleep(2.0)
             # 2. Process into Patches (Mid-points)
             # This significantly reduces graph size (1000s of ore nodes -> ~10 patch nodes)
             if raw_ores:

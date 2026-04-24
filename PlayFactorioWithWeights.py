@@ -19,7 +19,7 @@ from RunConfig import Config
 from environment import FactorioEnv
 from FactorioHGNN import FactorioHGNN
 from mappings import get_available_items
-from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
+from rcon_bridge.rcon_bridge import Rcon_reciever
 from ActionMasking import get_action_masks
 
 """

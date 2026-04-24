@@ -19,7 +19,7 @@ from environment import FactorioEnv
 from FactorioHGNN import FactorioHGNN
 from mappings import get_available_items
 from plotting import TrainingLogger
-from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
+from rcon_bridge.rcon_bridge import Rcon_reciever
 from ActionMasking import get_action_masks
 import timeit
 import torch.multiprocessing as mp
@@ -180,6 +180,24 @@ def dump_dashboard_state(state_dict):
     except Exception:
         pass # Ignore write collisions
 
+def dump_agent_state(agent_id, current_map, epsilon, step, episode_reward, total_actor_steps, steps_per_sec):
+    """Safely write individual agent state for Streamlit tabs."""
+    agent_file = f"agent_{agent_id}_state.json"
+    state_dict = {
+        "agent_id": agent_id,
+        "current_map": current_map,
+        "epsilon": epsilon,
+        "step": step,
+        "episode_reward": episode_reward,
+        "total_actor_steps": total_actor_steps,
+        "steps_per_sec": round(steps_per_sec, 2)
+    }
+    try:
+        with open(agent_file, 'w') as f:
+            json.dump(state_dict, f)
+    except Exception:
+        pass
+
 
 def save_checkpoint(path, policy_net, target_net, optimizer, memory, total_steps_ingested, updates_done):
     print(f"\nSaving autosave to {path}...")
@@ -199,13 +217,17 @@ def load_checkpoint(path, policy_net, target_net, optimizer, memory):
         return 0, 0
 
     print(f"Loading checkpoint from {path}...")
-    checkpoint = torch.load(path, weights_only=False)
-    policy_net.load_state_dict(checkpoint['policy_net'])
-    target_net.load_state_dict(checkpoint['target_net'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    memory.buffer = checkpoint['memory']
-
-    return checkpoint.get('total_steps_ingested', 0), checkpoint.get('updates_done', 0)
+    try:
+        checkpoint = torch.load(path, weights_only=False)
+        policy_net.load_state_dict(checkpoint['policy_net'])
+        target_net.load_state_dict(checkpoint['target_net'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        memory.buffer = checkpoint['memory']
+        return checkpoint.get('total_steps_ingested', 0), checkpoint.get('updates_done', 0)
+    except Exception as e:
+        print(f"Warning: Failed to load checkpoint (likely corrupted). Error: {e}")
+        print("Starting with fresh weights.")
+        return 0, 0
 
 
 class MapScheduler:
@@ -247,6 +269,10 @@ def actor_loop(agent_id, shared_policy, exp_queue, device, cfg):
     # Simple global step counter for epsilon decay
     actor_steps = 0
 
+    # --- Timing trackers for Iterations / Sec ---
+    last_log_time = time.time()
+    last_log_steps = 0
+
     while True:
         try:
             target_save = map_scheduler.get_next_map()
@@ -262,6 +288,7 @@ def actor_loop(agent_id, shared_policy, exp_queue, device, cfg):
 
             local_buffer = []
             steps_since_sync = 0
+            episode_reward = 0.0
 
             # Sync weights at the start of every episode
             local_policy.load_state_dict(shared_policy.state_dict())
@@ -301,6 +328,7 @@ def actor_loop(agent_id, shared_policy, exp_queue, device, cfg):
                 x_norm, y_norm = -1.0 + (x_grid / 16.0) * 2.0, -1.0 + (y_grid / 16.0) * 2.0
 
                 next_obs, reward, done, _ = actor.env.step(act, item, rot, x_norm, y_norm)
+                episode_reward += reward
 
                 if next_obs is not None:
                     s_nodes_cpu, s_H_cpu = node_feats.detach().cpu(), H.detach().cpu()
@@ -320,6 +348,19 @@ def actor_loop(agent_id, shared_policy, exp_queue, device, cfg):
                     hidden_state = next_hidden
 
                 steps_since_sync += 1
+                actor_steps += 1
+
+                # --- Calculate Iterations / Sec and update dashboard ---
+                if t % 50 == 0 or done:
+                    current_time = time.time()
+                    elapsed = current_time - last_log_time
+                    steps_diff = actor_steps - last_log_steps
+                    steps_per_sec = steps_diff / elapsed if elapsed > 0 else 0.0
+
+                    dump_agent_state(agent_id, target_save, epsilon, t, episode_reward, actor_steps, steps_per_sec)
+
+                    last_log_time = current_time
+                    last_log_steps = actor_steps
 
                 if done:
                     break
@@ -333,7 +374,7 @@ def actor_loop(agent_id, shared_policy, exp_queue, device, cfg):
             time.sleep(5)
 
 
-def learner_loop(shared_policy, exp_queue, device, cfg):
+def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
     print(f"[Learner] Starting up on {device}...")
 
     # --- GPU Models ---
@@ -449,7 +490,8 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
                         "current_loss": round(current_loss, 4),
                         "updates_per_sec": round(updates_per_sec, 2),
                         "elapsed_total": elapsed_tot,
-                        "hyperparameters": hyperparameters
+                        "hyperparameters": hyperparameters,
+                        "num_actors": num_actors
                     }
                     dump_dashboard_state(state_dict)
 
@@ -482,17 +524,19 @@ if __name__ == '__main__':
     NUM_ACTORS = 3
     actor_processes = []
 
+    # 1. Start ALL actor processes first
     for i in range(NUM_ACTORS):
         p = mp.Process(target=actor_loop, args=(i, shared_policy_net, experience_queue, cpu_device, cfg))
         p.start()
         actor_processes.append(p)
 
-        try:
-            learner_loop(shared_policy_net, experience_queue, gpu_device, cfg)
-        except KeyboardInterrupt:
-            print("\nShutting down workers...")
-            for p in actor_processes:
-                p.terminate()
-            for p in actor_processes:
-                p.join()
+    # 2. THEN start the learner loop on the main thread
+    try:
+        learner_loop(shared_policy_net, experience_queue, gpu_device, cfg, NUM_ACTORS)
+    except KeyboardInterrupt:
+        print("\nShutting down workers...")
+        for p in actor_processes:
+            p.terminate()
+        for p in actor_processes:
+            p.join()
         print("Shutdown complete.")

@@ -1,7 +1,7 @@
 import math
 from typing import Any
 
-import rcon_bridge_1_0_0.rcon_bridge
+import rcon_bridge.rcon_bridge
 
 # ==========================================
 #              HELPER FUNCTIONS

@@ -11,7 +11,7 @@ from typing import Union, Sequence, List, Dict, Any
 # --- IMPORTS FOR LIVE FETCHING ---
 try:
     import Edging
-    from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
+    from rcon_bridge.rcon_bridge import Rcon_reciever
 except ImportError:
     print("Warning: Could not import 'Edging' or 'rcon_bridge'. Ensure they are in the python path.")
 

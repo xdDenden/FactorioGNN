@@ -1,6 +1,6 @@
 from sympy import false
 
-import rcon_bridge_1_0_0.rcon_bridge as rcon_bridge
+import rcon_bridge.rcon_bridge as rcon_bridge
 from mappings import ID_TO_ACTION, ID_TO_ITEM
 
 def generate_jimbo_thought(action_idx, item_idx, rotation_idx):
