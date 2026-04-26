@@ -86,7 +86,7 @@ while True:
                 if os.path.exists(CSV_FILE):
                     try:
                         df = pd.read_csv(CSV_FILE)
-                        st.dataframe(df.tail(10), use_container_width=True)
+                        st.dataframe(df.tail(10), width="stretch")
 
                         chart_col1, chart_col2 = st.columns(2)
                         with chart_col1:

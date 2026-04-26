@@ -511,6 +511,8 @@ if __name__ == '__main__':
     cpu_device = torch.device("cpu")
     if torch.cuda.is_available():
         gpu_device = torch.device("cuda")
+    elif torch.mps.is_available():
+        gpu_device = torch.device("mps")
     else:
         gpu_device = torch.device("cpu")
 
