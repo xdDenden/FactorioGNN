@@ -2,10 +2,12 @@ import json
 import math
 import time
 from typing import List, Dict, Any, Optional
+import logging as logger
+
 import factorio_rcon
 from typing import TypedDict, Any, List
 
-import config
+import RunConfig
 
 HOST = "localhost"
 PORT = 27015
@@ -51,16 +53,35 @@ class Rcon_reciever:
         self._rcon: Optional[factorio_rcon.RCONClient] = None
 
     def connect(self) -> None:
-        # If we are reconnecting, ensure we close the old broken connection first
+        """Establishes or re-establishes the RCON connection"""
+
+        # 1. Clean up existing connection
         if self._rcon:
             try:
                 self._rcon.close()
-            except Exception:
-                pass
-            self._rcon = None
+            except Exception as e:
+                # Log the actual error instead of a placeholder string
+                logger.warning(f"Failed to close existing RCON connection: {e}")
+            finally:
+                # Ensure the reference is cleared regardless of success
+                self._rcon = None
 
-        self._rcon = factorio_rcon.RCONClient(self.host, self.port, self.password, self.timeout)
-        self._rcon.connect()
+        # 2. Attempt new connection
+        try:
+            client = factorio_rcon.RCONClient(
+                self.host,
+                self.port,
+                self.password,
+                timeout=self.timeout
+            )
+            client.connect()
+            self._rcon = client
+            logger.info(f"Successfully connected to RCON at {self.host}:{self.port}")
+
+        except Exception as e:
+            logger.error(f"Failed to establish RCON connection: {e}")
+            self._rcon = None  # Ensure state remains clean on failure
+            raise  # Re-raise if the caller needs to handle the failure
 
     def disconnect(self) -> None:
         if self._rcon:
@@ -173,16 +194,18 @@ class Rcon_reciever:
             return True
 
     def build(self, x: float, y: float, buildingIndex: int, rotation: int) -> bool:
+        # 1. check distance
         if not self.distanceCheck(x, y):
-            if config.Config.VERBOSE:
+            if RunConfig.Config.VERBOSE:
                 print(f"Build failed: Target ({x}, {y}) is too far away.")
             return False
 
         message = self._send_command_with_retry(f"/build {x} {y} {buildingIndex} {rotation} ")
 
-        if "ERROR" in message or "FAILED" in message:
-            if config.Config.VERBOSE:
-                print(f"Build Error: {message}")
+        # 3. ONLY receive if we actually sent the command
+        if "ERROR" or "FAILED" in message:
+            if RunConfig.Config.VERBOSE:
+                print(f"Build Error from server: {message}")
             return False
         else:
             if config.Config.VERBOSE:

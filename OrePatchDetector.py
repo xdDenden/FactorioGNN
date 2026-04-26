@@ -2,7 +2,7 @@ import numpy as np
 from scipy.spatial import ConvexHull
 from sklearn.cluster import DBSCAN
 from shapely.geometry import Point, Polygon
-from rcon_bridge_1_0_0.rcon_bridge import Rcon_reciever
+from rcon_bridge.rcon_bridge import Rcon_reciever
 
 
 class OrePatchDetector:

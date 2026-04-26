@@ -2,7 +2,7 @@ import json
 import time
 import torch
 import numpy as np
-import rcon_bridge_1_0_0.rcon_bridge as bridge
+import rcon_bridge.rcon_bridge as bridge
 import Edging
 import math
 from parsers import parse_entity, Entity, parse_resource
@@ -23,13 +23,19 @@ class PatchNode:
         # features.py looks for 'ore_name' to set the mining_target feature
         self.ore_name = ore_name
 
+
 class FactorioEnv:
-    def __init__(self, config):
+    def __init__(self, config, rcon_port=None, agent_id=0):
         self.cfg = config
+        self.agent_id = agent_id
+
+        # Use dynamic port if provided by the Actor, otherwise fallback to config
+        active_port = rcon_port if rcon_port is not None else self.cfg.RCON_PORT
+
         self.receiver = bridge.Rcon_reciever(
             self.cfg.RCON_HOST,
             self.cfg.RCON_PASSWORD,
-            self.cfg.RCON_PORT
+            active_port
         )
         self.current_bounds = None
 
@@ -69,7 +75,7 @@ class FactorioEnv:
             # 1. Scan Ores ONCE per episode
             raw_ores = self.receiver.scan_ore()
 
-            time.sleep(1.0)
+            time.sleep(2.0)
             # 2. Process into Patches (Mid-points)
             # This significantly reduces graph size (1000s of ore nodes -> ~10 patch nodes)
             if raw_ores:
@@ -83,7 +89,8 @@ class FactorioEnv:
                         PatchNode(p['ore_type'], center[0], center[1])
                     )
 
-                print(f"Processed {len(raw_ores)} ore entities into {len(self.patch_nodes)} patch centers.")
+                print(f"[Agent {self.agent_id}] Processed {len(raw_ores)} ore entities into {len(self.patch_nodes)} patch centers.")
+                self.current_patches = patches  # Store patches so the Actor can grab them for masking
 
             obs = self.get_observation()
             self._last_obs = obs
