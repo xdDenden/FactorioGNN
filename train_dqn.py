@@ -295,8 +295,7 @@ def actor_loop(agent_id, shared_policy, exp_queue, device, cfg):
 
             for t in range(cfg.MAX_TIMESTEPS):
                 if t > 0:
-                    obs = env._last_obs
-                timer.record('obs_fetch', timeit.default_timer() - t_start)
+                    obs = actor.env._last_obs
 
                 # Sync local weights with Learner periodically
                 if steps_since_sync >= SYNC_INTERVAL:
