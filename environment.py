@@ -25,9 +25,9 @@ class PatchNode:
 
 
 class FactorioEnv:
-    def __init__(self, config, rcon_port=None, agent_id=0):
+    def __init__(self, config, rcon_port=None, actor_id=0):
         self.cfg = config
-        self.agent_id = agent_id
+        self.actor_id = actor_id
 
         # Use dynamic port if provided by the Actor, otherwise fallback to config
         active_port = rcon_port if rcon_port is not None else self.cfg.RCON_PORT
@@ -89,7 +89,7 @@ class FactorioEnv:
                         PatchNode(p['ore_type'], center[0], center[1])
                     )
 
-                print(f"[Agent {self.agent_id}] Processed {len(raw_ores)} ore entities into {len(self.patch_nodes)} patch centers.")
+                print(f"[actor {self.actor_id}] Processed {len(raw_ores)} ore entities into {len(self.patch_nodes)} patch centers.")
                 self.current_patches = patches  # Store patches so the Actor can grab them for masking
 
             return self.get_observation()
@@ -244,7 +244,7 @@ class FactorioEnv:
         # --- C. Crafting Reward (Modified with Hard Cap) ---
         if action_idx == 2:  # craft action
             # HARD CAP: 500 items.
-            # After 500, the reward drops to 0, forcing the agent to Automate.
+            # After 500, the reward drops to 0, forcing the actor to Automate.
             if self.successful_crafts < 500:
                 alpha = 0.1  # decay rate
                 k = 5.0  # base reward

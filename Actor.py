@@ -11,14 +11,14 @@ from rcon_bridge.rcon_bridge import Rcon_reciever
 
 
 class ActorWorker:
-    def __init__(self, agent_id, base_rcon_port=27015):
-        self.agent_id = agent_id
-        self.rcon_port = base_rcon_port + agent_id
-        self.container_name = f"factorio_agent_{self.agent_id}"
-        self.save_dir = os.path.abspath(f"./factorio_data/agent_{self.agent_id}/saves")
+    def __init__(self, actor_id, base_rcon_port=27015):
+        self.actor_id = actor_id
+        self.rcon_port = base_rcon_port + actor_id
+        self.container_name = f"factorio_actor_{self.actor_id}"
+        self.save_dir = os.path.abspath(f"./factorio_data/actor_{self.actor_id}/saves")
 
         # 1. Expand the directory structure
-        self.base_dir = os.path.abspath(f"./factorio_data/agent_{self.agent_id}")
+        self.base_dir = os.path.abspath(f"./factorio_data/actor_{self.actor_id}")
         self.save_dir = os.path.join(self.base_dir, "saves")
         self.config_dir = os.path.join(self.base_dir, "config")
 
@@ -26,21 +26,21 @@ class ActorWorker:
         self.env = None
 
     def spin_up_container(self):
-        """Spins up the Docker container for this specific agent."""
+        """Spins up the Docker container for this specific actor."""
         client = docker.from_env()
 
         # 2. Ensure directories exist
         os.makedirs(self.save_dir, exist_ok=True)
         os.makedirs(self.config_dir, exist_ok=True)
 
-        # INJECT THE MOD INTO THE AGENT'S FOLDER
-        agent_mods_dir = os.path.join(self.base_dir, "mods")
-        os.makedirs(agent_mods_dir, exist_ok=True)
+        # INJECT THE MOD INTO THE actor'S FOLDER
+        actor_mods_dir = os.path.join(self.base_dir, "mods")
+        os.makedirs(actor_mods_dir, exist_ok=True)
 
         source_mod_dir = os.path.abspath("./rcon_bridge")
-        target_mod_dir = os.path.join(agent_mods_dir, "rcon_bridge")
+        target_mod_dir = os.path.join(actor_mods_dir, "rcon_bridge")
 
-        # Copy the mod into this specific agent's isolated mods folder
+        # Copy the mod into this specific actor's isolated mods folder
         if os.path.exists(target_mod_dir):
             shutil.rmtree(target_mod_dir)  # Refresh it in case you made script changes
         shutil.copytree(source_mod_dir, target_mod_dir)
@@ -50,25 +50,32 @@ class ActorWorker:
         with open(rconpw_path, "w") as f:
             f.write("eenie7Uphohpaim")
 
-        # Aggressive Cleanup
-        try:
-            old_container = client.containers.get(self.container_name)
-            print(f"[Agent {self.agent_id}] Found stuck container. Removing it...")
-            old_container.stop()
-            old_container.remove()
-        except docker.errors.NotFound:
-            pass
-        except Exception as e:
-            print(f"[Agent {self.agent_id}] Cleanup warning: {e}")
+            # Aggressive Cleanup
+            try:
+                old_container = client.containers.get(self.container_name)
+                print(f"[actor {self.actor_id}] Found stuck container. Stopping it...")
+                old_container.stop()
+                old_container.remove(force=True)
+            except docker.errors.NotFound:
+                pass
+            except docker.errors.APIError as e:
+                # If Docker is already removing it automatically, just let it happen quietly
+                if e.response.status_code == 409 and "already in progress" in str(e):
+                    pass
+                else:
+                    print(f"[actor {self.actor_id}] Cleanup warning: {e}")
+
+            # Give the port and name 3 seconds to fully release
+            time.sleep(3)
 
         # 4. START NEW CONTAINER
-        print(f"[Agent {self.agent_id}] Spinning up container on port {self.rcon_port}...")
+        print(f"[actor {self.actor_id}] Spinning up container on port {self.rcon_port}...")
 
         cfg = Config()
         # makes sure we can inspect the docker logs if we want to by not instantly deleting
         # the containers if a crash or exit does occur
         # by default it should remove all of them
-        if cfg.VERBOSE == True:
+        if cfg.VERBOSE:
             self.container = client.containers.run(
                 "factoriotools/factorio",
                 name=self.container_name,
@@ -87,7 +94,7 @@ class ActorWorker:
                 remove=True
             )
 
-        print(f"[Agent {self.agent_id}] Waiting for Factorio server to boot...")
+        print(f"[actor {self.actor_id}] Waiting for Factorio server to boot...")
         time.sleep(10)
 
         # 5. SMART POLLING LOOP
@@ -135,7 +142,7 @@ class ActorWorker:
 
                 # SUCCESS
                 server_ready = True
-                print(f"[Agent {self.agent_id}] Server is ONLINE and responding.")
+                print(f"[actor {self.actor_id}] Server is ONLINE and responding.")
                 test_receiver.reset()
                 break
 
@@ -152,7 +159,7 @@ class ActorWorker:
 
         # FINALLY evaluate if the server failed AFTER the loop concludes
         if not server_ready:
-            print(f"\n--- CONTAINER CRASH LOGS FOR AGENT {self.agent_id} ---")
+            print(f"\n--- CONTAINER CRASH LOGS FOR actor {self.actor_id} ---")
             try:
                 print(self.container.logs().decode('utf-8'))
             except Exception as log_e:
@@ -162,51 +169,33 @@ class ActorWorker:
             raise Exception(f"Container {self.container_name} failed to boot. Last error: {last_error}")
 
     def init_environment(self):
-        """Initializes the FactorioEnv specifically for this agent's port."""
+        """Initializes the FactorioEnv specifically for this actor's port."""
         cfg = Config()
         # Pass the dynamic port to the environment
         self.env = FactorioEnv(cfg, rcon_port=self.rcon_port)
+        self.env.actor_id = self.actor_id
 
     def stop(self):
         """Gracefully stops the container."""
         if self.container:
-            print(f"[Agent {self.agent_id}] Stopping container...")
+            print(f"[actor {self.actor_id}] Stopping container...")
             self.container.stop()
 
     def prepare_map_and_ores(self, map_source_path):
-        """Handles independent map loading and ore scanning for this specific agent."""
+        """Handles independent map loading and actor environment setup."""
         # 1. Clean and setup unique save directory
         if os.path.exists(self.save_dir):
             shutil.rmtree(self.save_dir)
         os.makedirs(self.save_dir, exist_ok=True)
 
-        # Copy map to this agent's specific folder
+        # Copy map to this actor's specific folder
         map_filename = os.path.basename(map_source_path)
         shutil.copy2(map_source_path, os.path.join(self.save_dir, map_filename))
 
-        # 2. Spin up container and init env (assuming these are updated to use self.save_dir)
+        # 2. Spin up container and init env
         self.spin_up_container()
         self.init_environment()
 
-        # 3. Ore Patch Process (Kept in memory, or saved with agent_id to avoid collisions)
-        # Using your existing Rcon_receiver logic tied to this agent's port:
-        receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", self.rcon_port)
-
-        receiver_ore.connect()
-
-        raw_ores = receiver_ore.scan_ore()
-
-        receiver_ore.reset()
-        time.sleep(10)
-        receiver_ore.disconnect()
-
-        detector = OrePatchDetector(raw_ores)
-        patches = detector.process_patches()
-
-        # Save with unique ID if ActionMasking requires reading from disk
-        self.patches_file = f"patches_agent_{self.agent_id}.json"
-        with open(self.patches_file, "w") as f:
-            patches_serializable = [{k: v for k, v in p.items() if k != 'polygon'} for p in patches]
-            json.dump(patches_serializable, f)
-
-        return patches
+        # We return an empty list because train_dqn.py overwrites this
+        # variable immediately with actor.env.current_patches anyway!
+        return []
