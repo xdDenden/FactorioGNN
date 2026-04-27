@@ -1,3 +1,4 @@
+import RunConfig
 import json
 import os
 import shutil
@@ -62,15 +63,29 @@ class ActorWorker:
 
         # 4. START NEW CONTAINER
         print(f"[Agent {self.agent_id}] Spinning up container on port {self.rcon_port}...")
-        self.container = client.containers.run(
-            "factoriotools/factorio",
-            name=self.container_name,
-            ports={'27015/tcp': self.rcon_port},
-            volumes={self.base_dir: {'bind': '/factorio', 'mode': 'rw'}},
-            detach=True,
-            remove=False
-            #TODO:should be set to true once working
-        )
+
+        cfg = Config()
+        # makes sure we can inspect the docker logs if we want to by not instantly deleting
+        # the containers if a crash or exit does occur
+        # by default it should remove all of them
+        if cfg.VERBOSE == True:
+            self.container = client.containers.run(
+                "factoriotools/factorio",
+                name=self.container_name,
+                ports={'27015/tcp': self.rcon_port},
+                volumes={self.base_dir: {'bind': '/factorio', 'mode': 'rw'}},
+                detach=True,
+                remove=False
+            )
+        else:
+            self.container = client.containers.run(
+                "factoriotools/factorio",
+                name=self.container_name,
+                ports={'27015/tcp': self.rcon_port},
+                volumes={self.base_dir: {'bind': '/factorio', 'mode': 'rw'}},
+                detach=True,
+                remove=True
+            )
 
         print(f"[Agent {self.agent_id}] Waiting for Factorio server to boot...")
         time.sleep(10)

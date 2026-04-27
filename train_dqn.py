@@ -423,85 +423,64 @@ def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
 
         # 2. Train if we have enough data
         if len(memory) >= MIN_BUFFER_SIZE:
+            # Inside learner_loop, when len(memory) >= MIN_BUFFER_SIZE:
             transitions = memory.sample(BATCH_SIZE)
             batch_state, batch_action, batch_reward, batch_next_state, batch_done = zip(*transitions)
 
-            loss_total = 0
+            # --- 1. Find Max Dimensions for Current Batch ---
+            max_nodes = max(state[0].shape[0] for state in batch_state)
+            max_edges = max(state[1].shape[1] for state in batch_state)
 
+            max_next_nodes = max(n_state[0].shape[0] for n_state in batch_next_state)
+            max_next_edges = max(n_state[1].shape[1] for n_state in batch_next_state)
+
+            # --- 2. Dynamically Infer Feature Dimension ---
+            feature_dim = batch_state[0][0].shape[1]
+
+            # --- 3. Prepare Padded Tensors ---
+            batched_s_nodes = torch.zeros((BATCH_SIZE, max_nodes, feature_dim), device=device)
+            batched_s_H = torch.zeros((BATCH_SIZE, max_nodes, max_edges), device=device)
+            node_masks = torch.zeros((BATCH_SIZE, max_nodes), dtype=torch.bool, device=device)
+
+            batched_ns_nodes = torch.zeros((BATCH_SIZE, max_next_nodes, feature_dim), device=device)
+            batched_ns_H = torch.zeros((BATCH_SIZE, max_next_nodes, max_next_edges), device=device)
+            next_node_masks = torch.zeros((BATCH_SIZE, max_next_nodes), dtype=torch.bool, device=device)
+
+            # --- 3. Fill the Tensors ---
             for i in range(BATCH_SIZE):
+                # Current State
                 s_nodes, s_H = batch_state[i]
-                a_act, a_item, a_rot, a_map = batch_action[i]
-                r = batch_reward[i]
+                n_nodes, n_edges = s_H.shape
+                batched_s_nodes[i, :n_nodes, :] = s_nodes.to(device)
+                batched_s_H[i, :n_nodes, :n_edges] = s_H.to(device)
+                node_masks[i, :n_nodes] = True  # True for real nodes, False for padded zeros
+
+                # Next State
                 ns_nodes, ns_H = batch_next_state[i]
-                d = batch_done[i]
+                nn_nodes, nn_edges = ns_H.shape
+                batched_ns_nodes[i, :nn_nodes, :] = ns_nodes.to(device)
+                batched_ns_H[i, :nn_nodes, :nn_edges] = ns_H.to(device)
+                next_node_masks[i, :nn_nodes] = True
 
-                # Move to GPU
-                s_nodes, s_H = s_nodes.to(device), s_H.to(device)
-                ns_nodes, ns_H = ns_nodes.to(device), ns_H.to(device)
+            # Prepare batch-sized LSTM dummy hidden states
+            dummy_h = (torch.zeros(BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device),
+                       torch.zeros(BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device))
 
-                dummy_h = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
-                           torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
+            # --- 4. ONE MASSIVE FORWARD PASS ---
+            # Actual Policy Net
+            q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(batched_s_nodes, batched_s_H, dummy_h, mask=node_masks)
 
-                # Forward pass on ACTUAL policy net
-                q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(s_nodes, s_H, dummy_h)
+            with torch.no_grad():
+                # Target Net
+                nq_act, nq_item, nq_rot, nq_map, _ = target_net(batched_ns_nodes, batched_ns_H, dummy_h,
+                                                                mask=next_node_masks)
 
-                with torch.no_grad():
-                    if d:
-                        target_val = r
-                    else:
-                        nq_act, nq_item, nq_rot, nq_map, _ = target_net(ns_nodes, ns_H, dummy_h)
-                        max_q = (nq_act.max() + nq_item.max() + nq_rot.max() + nq_map.max()) / 4.0
-                        target_val = r + GAMMA * max_q
 
-                target_tensor = torch.tensor([target_val], device=device)
-                l1 = criterion(q_act_v[0, a_act].unsqueeze(0), target_tensor)
-                l2 = criterion(q_item_v[0, a_item].unsqueeze(0), target_tensor)
-                l3 = criterion(q_rot_v[0, a_rot].unsqueeze(0), target_tensor)
-                l4 = criterion(q_map_v.view(-1)[a_map].unsqueeze(0), target_tensor)
-                loss_total += (l1 + l2 + l3 + l4)
-
-            # Backprop
-            optimizer.zero_grad()
-            (loss_total / BATCH_SIZE).backward()
-            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
-            optimizer.step()
-
-            updates_done += 1
-            current_loss = (loss_total / BATCH_SIZE).item()
-
-            # 3. Target Update & CPU Weight Push
-            if updates_done % TARGET_UPDATE == 0:
-                target_net.load_state_dict(policy_net.state_dict())
-
-                # PUSH WEIGHTS TO CPU FOR ACTORS TO PULL
-                shared_policy.load_state_dict({k: v.cpu() for k, v in policy_net.state_dict().items()})
-                print(f"[Learner] Target updated & weights synced to CPU at {updates_done} updates. Loss: {current_loss:.4f}")
-
-                # Example Dashboard Update / Checkpointing trigger
-                current_time = time.time()
-                if current_time - last_json_update > UPDATE_INTERVAL_SEC:
-                    elapsed_tot = current_time - start_time_total
-                    updates_per_sec = (updates_done - last_updates_count) / (current_time - last_json_update)
-
-                    state_dict = {
-                        "steps_ingested": total_steps_ingested,
-                        "updates_done": updates_done,
-                        "buffer_size": len(memory),
-                        "current_loss": round(current_loss, 4),
-                        "updates_per_sec": round(updates_per_sec, 2),
-                        "elapsed_total": elapsed_tot,
-                        "hyperparameters": hyperparameters,
-                        "num_actors": num_actors
-                    }
-                    dump_dashboard_state(state_dict)
-
-                    last_json_update = current_time
-                    last_updates_count = updates_done
-
-                    # Autosave periodically
-                    if updates_done % (TARGET_UPDATE * 10) == 0:
-                        save_checkpoint(AUTOSAVE_PATH, policy_net, target_net, optimizer, memory, total_steps_ingested, updates_done)
-
+# this line should make sure that any not implemented MPS operations will throw CPU fallback errors instead of crashing the process
+# this should make it carry on the operation on the cpu
+# since i dont know what specific operation might happen and cant fix a not implemented error cus im NOT like that
+# we just use this line instead
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
@@ -511,6 +490,8 @@ if __name__ == '__main__':
     cpu_device = torch.device("cpu")
     if torch.cuda.is_available():
         gpu_device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        gpu_device = torch.device("mps")
     else:
         gpu_device = torch.device("cpu")
 
