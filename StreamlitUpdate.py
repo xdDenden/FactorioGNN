@@ -53,11 +53,11 @@ while True:
 
                     c1, c2, c3, c4, c5 = st.columns(5)
                     c1.metric("Total Steps Ingested", f"{state.get('steps_ingested', 0):,}")
-                    c2.metric("Network Updates Done", f"{state.get('updates_done', 0):,}")
-                    c3.metric("Replay Buffer", f"{state.get('buffer_size', 0):,}")
+                    c2.metric("Network Updates Done", f"{state.get('updates_done', 0):,}",help = "The total number of times the Learner has performed a training update on the GPU.")
+                    c3.metric("Replay Buffer", f"{state.get('buffer_size', 0):,}",help = "The amount of steps inside the replay buffer ready for training.")
 
                     # Add the Queue Size metric
-                    c4.metric("MP Queue Size", f"{state.get('queue_size', 0):,}")
+                    c4.metric("MP Queue Size", f"{state.get('queue_size', 0):,}",help = " The amount of chunks not in the replay buffer. Value * chunk size = Steps")
 
                     c5.metric("Current Loss", state.get("current_loss", 0.0))
                     st.subheader("Performance")
@@ -83,7 +83,7 @@ while True:
                     b1.metric("Actor Ingestion Rate", f"{ingest_rate} steps/sec",
                               help="Global speed of all Actors combined.")
                     b2.metric("GPU Training Rate", f"{train_rate} samples/sec",
-                              help="Speed the GPU is pulling from the Replay Buffer.")
+                              help="Speed the GPU is pulling from the Replay Buffer. Updates/Sec * Batch Size.")
 
                     # Determine Bottleneck Status dynamically
                     if utd > 8:
@@ -93,7 +93,8 @@ while True:
                     else:
                         bottleneck = "🟢 Balanced Pipeline"
 
-                    b3.metric("Update-To-Data (UTD) Ratio", f"{utd}x", delta=bottleneck, delta_color="off")
+                    b3.metric("Update-To-Data (UTD) Ratio", f"{utd}x", help = "Represents how many times the GPU trains on the same Data"
+                              ,delta=bottleneck, delta_color="off")
 
                     st.divider()
 
@@ -102,7 +103,7 @@ while True:
                     with col1:
                         st.subheader("Architecture")
                         st.info(
-                            "Actors stream chunks of 32 steps to Host RAM queue.\n\nLearner unrolls chunks, batches, trains on GPU, and pushes weights to CPU.")
+                            "Actors stream chunks of 32 steps to Host RAM queue.\n\nLearner unrolls chunks, batches, trains on GPU, and pushes weights back to CPU.")
 
                     with col2:
                         st.subheader("Hyperparameters")
