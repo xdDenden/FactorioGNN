@@ -49,3 +49,4 @@ class Config:
     # Debugging
     VERBOSE: bool = False  # Set to False to silence per-step prints
     SAVE_GRAPHS: bool = False  # If True, saves GraphML every step (very slow)
+

@@ -11,11 +11,12 @@ from rcon_bridge.rcon_bridge import Rcon_reciever
 
 
 class ActorWorker:
-    def __init__(self, actor_id, base_rcon_port=27015):
+    def __init__(self, actor_id, base_rcon_port=27015, base_game_port=34197):
         self.actor_id = actor_id
         self.rcon_port = base_rcon_port + actor_id
         self.container_name = f"factorio_actor_{self.actor_id}"
         self.save_dir = os.path.abspath(f"./factorio_data/actor_{self.actor_id}/saves")
+        self.game_port = base_game_port + actor_id
 
         # 1. Expand the directory structure
         self.base_dir = os.path.abspath(f"./factorio_data/actor_{self.actor_id}")
@@ -75,11 +76,14 @@ class ActorWorker:
         # makes sure we can inspect the docker logs if we want to by not instantly deleting
         # the containers if a crash or exit does occur
         # by default it should remove all of them
-        if cfg.VERBOSE:
+        if cfg.VERBOSE == True:
             self.container = client.containers.run(
                 "factoriotools/factorio",
                 name=self.container_name,
-                ports={'27015/tcp': self.rcon_port},
+                ports={
+                    '27015/tcp': self.rcon_port,
+                    '34197/udp': self.game_port  # <--- Add this line!
+                },
                 volumes={self.base_dir: {'bind': '/factorio', 'mode': 'rw'}},
                 detach=True,
                 remove=False
@@ -88,7 +92,10 @@ class ActorWorker:
             self.container = client.containers.run(
                 "factoriotools/factorio",
                 name=self.container_name,
-                ports={'27015/tcp': self.rcon_port},
+                ports={
+                    '27015/tcp': self.rcon_port,
+                    '34197/udp': self.game_port  # <--- Add this line!
+                },
                 volumes={self.base_dir: {'bind': '/factorio', 'mode': 'rw'}},
                 detach=True,
                 remove=True
@@ -176,11 +183,21 @@ class ActorWorker:
         self.env.actor_id = self.actor_id
 
     def stop(self):
-        """Gracefully stops the container."""
-        if self.container:
-            print(f"[actor {self.actor_id}] Stopping container...")
-            self.container.stop()
+        """Gracefully stops and explicitly removes the container."""
+        # Safely get the ID in case it was missing or renamed
+        a_id = getattr(self, 'agent_id', 'Unknown')
 
+        # Safely check if the container attribute actually exists and holds a container
+        if hasattr(self, 'container') and self.container is not None:
+            print(f"[Agent {a_id}] Halting and deleting container...")
+            try:
+                self.container.stop()
+                self.container.remove(force=True)
+                print(f"[Agent {a_id}] Container successfully deleted.")
+            except Exception as e:
+                print(f"[Agent {a_id}] Error during container deletion: {e}")
+        else:
+            print(f"[Agent {a_id}] No container found to delete. Shutting down.")
     def prepare_map_and_ores(self, map_source_path):
         """Handles independent map loading and actor environment setup."""
         # 1. Clean and setup unique save directory

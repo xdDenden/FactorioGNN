@@ -256,103 +256,108 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
     last_log_time = time.time()
     last_log_steps = 0
 
-    while True:
-        try:
-            target_save = map_scheduler.get_next_map()
-            map_source_path = os.path.join(cfg.SAVES_POOL, target_save)
+    try:
+        while True:
+            try:
+                target_save = map_scheduler.get_next_map()
+                map_source_path = os.path.join(cfg.SAVES_POOL, target_save)
 
-            patches = actor.prepare_map_and_ores(map_source_path)
-            obs = actor.env.reset()
-            if obs is None: continue
+                patches = actor.prepare_map_and_ores(map_source_path)
+                obs = actor.env.reset()
+                if obs is None: continue
 
-            patches = actor.env.current_patches
-            hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
-                            torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
+                patches = actor.env.current_patches
+                hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
+                                torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
 
-            local_buffer = []
-            steps_since_sync = 0
-            episode_reward = 0.0
+                local_buffer = []
+                steps_since_sync = 0
+                episode_reward = 0.0
 
-            # Sync weights at the start of every episode
-            local_policy.load_state_dict(shared_policy.state_dict())
+                # Sync weights at the start of every episode
+                local_policy.load_state_dict(shared_policy.state_dict())
 
-            for t in range(cfg.MAX_TIMESTEPS):
-                if t > 0:
-                    obs = actor.env._last_obs
+                for t in range(cfg.MAX_TIMESTEPS):
+                    if t > 0:
+                        obs = actor.env._last_obs
 
-                if steps_since_sync >= cfg.SYNC_INTERVAL:
-                    local_policy.load_state_dict(shared_policy.state_dict())
-                    steps_since_sync = 0
+                    if steps_since_sync >= cfg.SYNC_INTERVAL:
+                        local_policy.load_state_dict(shared_policy.state_dict())
+                        steps_since_sync = 0
 
-                node_feats, H = obs
-                node_feats, H = node_feats.to(device), H.to(device)
+                    node_feats, H = obs
+                    node_feats, H = node_feats.to(device), H.to(device)
 
-                raw_entities = actor.env._last_raw_entities
-                raw_player = actor.env._last_raw_player
-                inv_list = raw_player.get('inventory', [])
-                inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
-                valid_items = get_available_items(actor.env.receiver.scan_research())
+                    raw_entities = actor.env._last_raw_entities
+                    raw_player = actor.env._last_raw_player
+                    inv_list = raw_player.get('inventory', [])
+                    inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
+                    valid_items = get_available_items(actor.env.receiver.scan_research())
 
-                masks = get_action_masks(
-                    entities=raw_entities, player_info=raw_player, inventory=inventory,
-                    available_items=valid_items, bounds=actor.env.current_bounds,
-                    patches=patches, move_state=actor.env.move_state
-                )
+                    masks = get_action_masks(
+                        entities=raw_entities, player_info=raw_player, inventory=inventory,
+                        available_items=valid_items, bounds=actor.env.current_bounds,
+                        patches=patches, move_state=actor.env.move_state
+                    )
 
-                epsilon = max(cfg.EPSILON_END, cfg.EPSILON_START - (cfg.EPSILON_START - cfg.EPSILON_END) * (actor_steps / cfg.EPSILON_DECAY))
+                    epsilon = max(cfg.EPSILON_END, cfg.EPSILON_START - (cfg.EPSILON_START - cfg.EPSILON_END) * (actor_steps / cfg.EPSILON_DECAY))
 
-                # Infer from LOCAL policy
-                act, item, rot, map_idx, next_hidden = select_action(
-                    local_policy, node_feats, H, hidden_state, epsilon, device, masks
-                )
+                    # Infer from LOCAL policy
+                    act, item, rot, map_idx, next_hidden = select_action(
+                        local_policy, node_feats, H, hidden_state, epsilon, device, masks
+                    )
 
-                y_grid, x_grid = map_idx // 17, map_idx % 17
-                x_norm, y_norm = -1.0 + (x_grid / 16.0) * 2.0, -1.0 + (y_grid / 16.0) * 2.0
+                    y_grid, x_grid = map_idx // 17, map_idx % 17
+                    x_norm, y_norm = -1.0 + (x_grid / 16.0) * 2.0, -1.0 + (y_grid / 16.0) * 2.0
 
-                next_obs, reward, done, _ = actor.env.step(act, item, rot, x_norm, y_norm)
-                episode_reward += reward
+                    next_obs, reward, done, _ = actor.env.step(act, item, rot, x_norm, y_norm)
+                    episode_reward += reward
 
-                if next_obs is not None:
-                    s_nodes_cpu, s_H_cpu = node_feats.detach().cpu(), H.detach().cpu()
-                    ns_nodes_cpu, ns_H_cpu = next_obs[0].detach().cpu(), next_obs[1].detach().cpu()
-                    action_tuple = (act, item, rot, map_idx)
+                    if next_obs is not None:
+                        s_nodes_cpu, s_H_cpu = node_feats.detach().cpu(), H.detach().cpu()
+                        ns_nodes_cpu, ns_H_cpu = next_obs[0].detach().cpu(), next_obs[1].detach().cpu()
+                        action_tuple = (act, item, rot, map_idx)
 
-                    # Append to local chunk buffer
-                    local_buffer.append((
-                        (s_nodes_cpu, s_H_cpu), action_tuple, reward, (ns_nodes_cpu, ns_H_cpu), done
-                    ))
+                        # Append to local chunk buffer
+                        local_buffer.append((
+                            (s_nodes_cpu, s_H_cpu), action_tuple, reward, (ns_nodes_cpu, ns_H_cpu), done
+                        ))
 
-                    if len(local_buffer) >= cfg.CHUNK_SIZE:
-                        exp_queue.put(local_buffer)
-                        local_buffer = []
+                        if len(local_buffer) >= cfg.CHUNK_SIZE:
+                            exp_queue.put(local_buffer)
+                            local_buffer = []
 
-                    hidden_state = next_hidden
+                        hidden_state = next_hidden
 
-                steps_since_sync += 1
-                actor_steps += 1
+                    steps_since_sync += 1
+                    actor_steps += 1
 
-                # --- Calculate Iterations / Sec and update dashboard ---
-                if t % 50 == 0 or done:
-                    current_time = time.time()
-                    elapsed = current_time - last_log_time
-                    steps_diff = actor_steps - last_log_steps
-                    steps_per_sec = steps_diff / elapsed if elapsed > 0 else 0.0
+                    # --- Calculate Iterations / Sec and update dashboard ---
+                    if t % 50 == 0 or done:
+                        current_time = time.time()
+                        elapsed = current_time - last_log_time
+                        steps_diff = actor_steps - last_log_steps
+                        steps_per_sec = steps_diff / elapsed if elapsed > 0 else 0.0
 
-                    dump_actor_state(actor_id, target_save, epsilon, t, episode_reward, actor_steps, steps_per_sec)
+                        dump_actor_state(actor_id, target_save, epsilon, t, episode_reward, actor_steps, steps_per_sec)
 
-                    last_log_time = current_time
-                    last_log_steps = actor_steps
+                        last_log_time = current_time
+                        last_log_steps = actor_steps
 
-                if done:
-                    break
+                    if done:
+                        break
 
-            # Empty remaining buffer at end of episode
-            if len(local_buffer) > 0:
-                exp_queue.put(local_buffer)
+                # Empty remaining buffer at end of episode
+                if len(local_buffer) > 0:
+                    exp_queue.put(local_buffer)
 
-        except Exception as e:
-            print(f"[Actor {actor_id}] Crashed: {e}. Restarting environment...")
-            time.sleep(5)
+            except Exception as e:
+                print(f"[Actor {actor_id}] Crashed: {e}. Restarting environment...")
+                time.sleep(5)
+    except KeyboardInterrupt:
+        print(f"[Actor {actor_id}] Received shutdown signal.")
+    finally:
+        actor.stop()
 
 
 # ==========================================
@@ -582,9 +587,17 @@ if __name__ == '__main__':
     try:
         learner_loop(shared_policy_net, experience_queue, gpu_device, cfg)
     except KeyboardInterrupt:
-        print("\nShutting down workers...")
+        print("\n[Master] Ctrl+C detected. Asking Actors to pack up and delete their containers...")
+
+        # We DO NOT use p.terminate() here anymore.
+        # We wait for the Actors to run their `finally` blocks and close themselves.
         for p in actor_processes:
-            p.terminate()
+            p.join(timeout=10)  # Give them up to 10 seconds to delete the containers
+
+        # If any actor is totally frozen and didn't shut down after 10 seconds, THEN execute them
         for p in actor_processes:
-            p.join()
-        print("Shutdown complete.")
+            if p.is_alive():
+                print(f"[Master] Force terminating stuck process: {p.name}")
+                p.terminate()
+
+        print("[Master] All containers deleted. Shutdown complete.")
