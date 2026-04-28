@@ -22,7 +22,7 @@ placeholder = st.empty()
 
 while True:
     with placeholder.container():
-        st.title("Factorio AI Distributed Dashboard")
+        st.title("Factorio AI Dashboard")
 
         # 1. Load Global Learner State
         state = {}
