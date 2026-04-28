@@ -524,11 +524,17 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
                     # UTD Ratio (How many training samples processed per 1 new environment step)
                     utd_ratio = training_rate / ingestion_rate if ingestion_rate > 0 else 0.0
 
+                    # since macos isnt fully implemented we gotta do this
+                    try:
+                        current_qsize = exp_queue.qsize()
+                    except NotImplementedError:
+                        current_qsize = "N/A on Mac"
+
                     state_dict = {
                         "steps_ingested": total_steps_ingested,
                         "updates_done": updates_done,
                         "buffer_size": len(memory),
-                        "queue_size": exp_queue.qsize(),
+                        "queue_size": current_qsize,
                         "current_loss": round(current_loss, 4),
                         "updates_per_sec": round(updates_per_sec, 2),
                         "ingestion_rate": round(ingestion_rate, 2),
