@@ -12,8 +12,7 @@ import traceback
 import json
 import docker
 import Actor
-import RunConfig
-from RunConfig import *
+from RunConfig import Config
 from OrePatchDetector import OrePatchDetector
 from environment import FactorioEnv
 from FactorioHGNN import FactorioHGNN
@@ -24,26 +23,11 @@ from ActionMasking import get_action_masks
 import timeit
 import torch.multiprocessing as mp
 
-# --- Hyperparameters ---
-GAMMA = 0.99  # Discount factor for future rewards
-LR = 1e-4  # Learning rate for the optimizer
-BATCH_SIZE = 128  # Number of samples per training batch
-BUFFER_SIZE = 5000  # Maximum size of the replay buffer
-EPSILON_START = 1.0  # Initial value of epsilon for epsilon-greedy policy
-EPSILON_END = 0.05  # Minimum value of epsilon for epsilon-greedy policy
-EPSILON_DECAY = 563698  # Decay rate for epsilon over time
-TARGET_UPDATE = 200  # Frequency of target network updates (in gradient steps)
-NUM_EPISODES = 50  # Total number of episodes to train the model
-AUTOSAVE_PATH = "autosave.pth"
+# Initialize config globally so helper functions have access
+cfg = Config()
 
-
-#-- Docker Parameters
-CONTAINER_NAME = "factorio"  # Name of the Factorio Docker container
-SAVE_FOLDER = os.path.join(".", "factorio_data", "saves") # Path to the saves folder on the host machine
-SAVES_POOL = "./SAVES_POOL" # Path to the saves we use to test the AI this will be within this project
-UPDATE_INTERVAL_SEC = 5.0  # Update the dashboard JSON every 5 seconds
-STATE_FILE = "dashboard_state.json"
-os.makedirs(SAVE_FOLDER, exist_ok=True)
+# Make sure our save folder exists
+os.makedirs(cfg.SAVE_FOLDER, exist_ok=True)
 
 class TimingTracker:
     """Tracks timing statistics for different operations."""
@@ -145,8 +129,7 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
         valid_locs = np.nonzero(space_mask[act])[0]
         heatmap_idx = random.choice(valid_locs) if len(valid_locs) > 0 else 0
 
-        # Return dummy hidden state
-        h_next = (torch.zeros(1, 256).to(device), torch.zeros(1, 256).to(device))
+        h_next = (torch.zeros(1, cfg.HIDDEN_DIM).to(device), torch.zeros(1, cfg.HIDDEN_DIM).to(device))
         return act, item, rot, heatmap_idx, h_next
 
     else:
@@ -175,7 +158,7 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
 def dump_dashboard_state(state_dict):
     """Safely write state to JSON so Streamlit can read it."""
     try:
-        with open(STATE_FILE, 'w') as f:
+        with open(cfg.STATE_FILE, 'w') as f:
             json.dump(state_dict, f)
     except Exception:
         pass # Ignore write collisions
@@ -247,13 +230,16 @@ class MapScheduler:
 
 
 
+    #main training loop
+
+
 # ==========================================
 # 1. THE ACTOR LOOP (Runs in multiple processes)
 # ==========================================
 def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
     print(f"[Actor {actor_id}] Booting up on {device}...")
 
-    map_scheduler = MapScheduler(SAVES_POOL)
+    map_scheduler = MapScheduler(cfg.SAVES_POOL)
     actor = Actor.ActorWorker(actor_id)
 
     # --- Local Replica ---
@@ -270,108 +256,114 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
     last_log_time = time.time()
     last_log_steps = 0
 
-    while True:
-        try:
-            target_save = map_scheduler.get_next_map()
-            map_source_path = os.path.join(SAVES_POOL, target_save)
+    try:
+        while True:
+            try:
+                target_save = map_scheduler.get_next_map()
+                map_source_path = os.path.join(cfg.SAVES_POOL, target_save)
 
-            patches = actor.prepare_map_and_ores(map_source_path)
-            obs = actor.env.reset()
-            if obs is None: continue
+                patches = actor.prepare_map_and_ores(map_source_path)
+                obs = actor.env.reset()
+                if obs is None: continue
 
-            patches = actor.env.current_patches
-            hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
-                            torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
+                patches = actor.env.current_patches
+                hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
+                                torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
 
-            local_buffer = []
-            steps_since_sync = 0
-            episode_reward = 0.0
+                local_buffer = []
+                steps_since_sync = 0
+                episode_reward = 0.0
 
-            # Sync weights at the start of every episode
-            local_policy.load_state_dict(shared_policy.state_dict())
+                # Sync weights at the start of every episode
+                local_policy.load_state_dict(shared_policy.state_dict())
 
-            for t in range(cfg.MAX_TIMESTEPS):
-                if t > 0:
-                    obs = actor.env._last_obs
+                for t in range(cfg.MAX_TIMESTEPS):
+                    if t > 0:
+                        obs = actor.env._last_obs
 
-                # Sync local weights with Learner periodically
-                if steps_since_sync >= SYNC_INTERVAL:
-                    local_policy.load_state_dict(shared_policy.state_dict())
-                    steps_since_sync = 0
+                    if steps_since_sync >= cfg.SYNC_INTERVAL:
+                        local_policy.load_state_dict(shared_policy.state_dict())
+                        steps_since_sync = 0
 
-                node_feats, H = obs
-                node_feats, H = node_feats.to(device), H.to(device)
+                    node_feats, H = obs
+                    node_feats, H = node_feats.to(device), H.to(device)
 
-                raw_entities = actor.env._last_raw_entities
-                raw_player = actor.env._last_raw_player
-                inv_list = raw_player.get('inventory', [])
-                inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
-                valid_items = get_available_items(actor.env.receiver.scan_research())
+                    raw_entities = actor.env._last_raw_entities
+                    raw_player = actor.env._last_raw_player
+                    inv_list = raw_player.get('inventory', [])
+                    inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
+                    valid_items = get_available_items(actor.env.receiver.scan_research())
 
-                masks = get_action_masks(
-                    entities=raw_entities, player_info=raw_player, inventory=inventory,
-                    available_items=valid_items, bounds=actor.env.current_bounds,
-                    patches=patches, move_state=actor.env.move_state
-                )
+                    masks = get_action_masks(
+                        entities=raw_entities, player_info=raw_player, inventory=inventory,
+                        available_items=valid_items, bounds=actor.env.current_bounds,
+                        patches=patches, move_state=actor.env.move_state
+                    )
 
-                epsilon = max(EPSILON_END, EPSILON_START - (EPSILON_START - EPSILON_END) * (actor_steps / EPSILON_DECAY))
+                    epsilon = max(cfg.EPSILON_END, cfg.EPSILON_START - (cfg.EPSILON_START - cfg.EPSILON_END) * (actor_steps / cfg.EPSILON_DECAY))
 
-                # Infer from LOCAL policy
-                act, item, rot, map_idx, next_hidden = select_action(
-                    local_policy, node_feats, H, hidden_state, epsilon, device, masks
-                )
+                    # Infer from LOCAL policy
+                    act, item, rot, map_idx, next_hidden = select_action(
+                        local_policy, node_feats, H, hidden_state, epsilon, device, masks
+                    )
 
-                y_grid, x_grid = map_idx // 17, map_idx % 17
-                x_norm, y_norm = -1.0 + (x_grid / 16.0) * 2.0, -1.0 + (y_grid / 16.0) * 2.0
+                    y_grid, x_grid = map_idx // 17, map_idx % 17
+                    x_norm, y_norm = -1.0 + (x_grid / 16.0) * 2.0, -1.0 + (y_grid / 16.0) * 2.0
 
-                next_obs, reward, done, _ = actor.env.step(act, item, rot, x_norm, y_norm)
-                episode_reward += reward
+                    next_obs, reward, done, _ = actor.env.step(act, item, rot, x_norm, y_norm)
+                    episode_reward += reward
 
-                if next_obs is not None:
-                    s_nodes_cpu, s_H_cpu = node_feats.detach().cpu(), H.detach().cpu()
-                    ns_nodes_cpu, ns_H_cpu = next_obs[0].detach().cpu(), next_obs[1].detach().cpu()
-                    action_tuple = (act, item, rot, map_idx)
+                    if next_obs is not None:
+                        s_nodes_cpu, s_H_cpu = node_feats.detach().cpu(), H.detach().cpu()
+                        ns_nodes_cpu, ns_H_cpu = next_obs[0].detach().cpu(), next_obs[1].detach().cpu()
+                        action_tuple = (act, item, rot, map_idx)
 
-                    # Append to local chunk buffer
-                    local_buffer.append((
-                        (s_nodes_cpu, s_H_cpu), action_tuple, reward, (ns_nodes_cpu, ns_H_cpu), done
-                    ))
+                        # Append to local chunk buffer
+                        local_buffer.append((
+                            (s_nodes_cpu, s_H_cpu), action_tuple, reward, (ns_nodes_cpu, ns_H_cpu), done
+                        ))
 
-                    # Push chunk to queue
-                    if len(local_buffer) >= CHUNK_SIZE:
-                        exp_queue.put(local_buffer)
-                        local_buffer = []
+                        if len(local_buffer) >= cfg.CHUNK_SIZE:
+                            exp_queue.put(local_buffer)
+                            local_buffer = []
 
-                    hidden_state = next_hidden
+                        hidden_state = next_hidden
 
-                steps_since_sync += 1
-                actor_steps += 1
+                    steps_since_sync += 1
+                    actor_steps += 1
 
-                # --- Calculate Iterations / Sec and update dashboard ---
-                if t % 50 == 0 or done:
-                    current_time = time.time()
-                    elapsed = current_time - last_log_time
-                    steps_diff = actor_steps - last_log_steps
-                    steps_per_sec = steps_diff / elapsed if elapsed > 0 else 0.0
+                    # --- Calculate Iterations / Sec and update dashboard ---
+                    if t % 50 == 0 or done:
+                        current_time = time.time()
+                        elapsed = current_time - last_log_time
+                        steps_diff = actor_steps - last_log_steps
+                        steps_per_sec = steps_diff / elapsed if elapsed > 0 else 0.0
 
-                    dump_actor_state(actor_id, target_save, epsilon, t, episode_reward, actor_steps, steps_per_sec)
+                        dump_actor_state(actor_id, target_save, epsilon, t, episode_reward, actor_steps, steps_per_sec)
 
-                    last_log_time = current_time
-                    last_log_steps = actor_steps
+                        last_log_time = current_time
+                        last_log_steps = actor_steps
 
-                if done:
-                    break
+                    if done:
+                        break
 
-            # Empty remaining buffer at end of episode
-            if len(local_buffer) > 0:
-                exp_queue.put(local_buffer)
+                # Empty remaining buffer at end of episode
+                if len(local_buffer) > 0:
+                    exp_queue.put(local_buffer)
 
-        except Exception as e:
-            print(f"[Actor {actor_id}] Crashed: {e}. Restarting environment...")
-            time.sleep(5)
+            except Exception as e:
+                print(f"[Actor {actor_id}] Crashed: {e}. Restarting environment...")
+                time.sleep(5)
+    except KeyboardInterrupt:
+        print(f"[Actor {actor_id}] Received shutdown signal.")
+    finally:
+        actor.stop()
 
 
-def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
+# ==========================================
+# 2. THE LEARNER LOOP (Runs on Main Thread)
+# ==========================================
+def learner_loop(shared_policy, exp_queue, device, cfg):
     print(f"[Learner] Starting up on {device}...")
 
     # --- GPU Models ---
@@ -382,22 +374,22 @@ def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
     target_net.load_state_dict(policy_net.state_dict())
     target_net.eval()
 
-    optimizer = optim.Adam(policy_net.parameters(), lr=LR)
+    optimizer = optim.Adam(policy_net.parameters(), lr=cfg.LR)
     criterion = nn.MSELoss()
-    memory = ReplayBuffer(BUFFER_SIZE)
+    memory = ReplayBuffer(cfg.BUFFER_SIZE)
 
     updates_done = 0
     total_steps_ingested = 0
 
-    if os.path.exists(AUTOSAVE_PATH):
-        total_steps_ingested, updates_done = load_checkpoint(AUTOSAVE_PATH, policy_net, target_net, optimizer, memory)
+    if os.path.exists(cfg.AUTOSAVE_PATH):
+        total_steps_ingested, updates_done = load_checkpoint(cfg.AUTOSAVE_PATH, policy_net, target_net, optimizer, memory)
     else:
         policy_net.load_state_dict(shared_policy.state_dict())
         target_net.load_state_dict(policy_net.state_dict())
 
     target_net.eval()
 
-    MIN_BUFFER_SIZE = BATCH_SIZE * 5
+    MIN_BUFFER_SIZE = cfg.BATCH_SIZE * 5
 
     last_json_update = time.time()
     last_updates_count = updates_done
@@ -409,7 +401,7 @@ def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
     while True:
         # 1. Unroll the queue chunks into the Replay Buffer
         chunks_unrolled = 0
-        max_chunks_per_step = 40 #
+        max_chunks_per_step = 40
         while not exp_queue.empty() and chunks_unrolled < max_chunks_per_step:
             try:
                 chunk = exp_queue.get_nowait()
@@ -420,9 +412,8 @@ def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
             except Exception:
                 break  # Queue empty or busy
 
-        # 2. Train if we have enough data
-        if len(memory) >= MIN_BUFFER_SIZE:
-            transitions = memory.sample(BATCH_SIZE)
+        if len(memory) >= cfg.MIN_BUFFER_SIZE:
+            transitions = memory.sample(cfg.BATCH_SIZE)
             batch_state, batch_action, batch_reward, batch_next_state, batch_done = zip(*transitions)
 
             # --- 1. Find Max Dimensions for Current Batch ---
@@ -435,18 +426,15 @@ def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
             # --- 2. Dynamically Infer Feature Dimension ---
             feature_dim = batch_state[0][0].shape[1]
 
-            # --- 3. Prepare Padded Tensors ---
-            batched_s_nodes = torch.zeros((BATCH_SIZE, max_nodes, feature_dim), device=device)
-            batched_s_H = torch.zeros((BATCH_SIZE, max_nodes, max_edges), device=device)
-            node_masks = torch.zeros((BATCH_SIZE, max_nodes), dtype=torch.bool, device=device)
+            batched_s_nodes = torch.zeros((cfg.BATCH_SIZE, max_nodes, feature_dim), device=device)
+            batched_s_H = torch.zeros((cfg.BATCH_SIZE, max_nodes, max_edges), device=device)
+            node_masks = torch.zeros((cfg.BATCH_SIZE, max_nodes), dtype=torch.bool, device=device)
 
-            batched_ns_nodes = torch.zeros((BATCH_SIZE, max_next_nodes, feature_dim), device=device)
-            batched_ns_H = torch.zeros((BATCH_SIZE, max_next_nodes, max_next_edges), device=device)
-            next_node_masks = torch.zeros((BATCH_SIZE, max_next_nodes), dtype=torch.bool, device=device)
+            batched_ns_nodes = torch.zeros((cfg.BATCH_SIZE, max_next_nodes, feature_dim), device=device)
+            batched_ns_H = torch.zeros((cfg.BATCH_SIZE, max_next_nodes, max_next_edges), device=device)
+            next_node_masks = torch.zeros((cfg.BATCH_SIZE, max_next_nodes), dtype=torch.bool, device=device)
 
-            # --- 4. Fill the Tensors ---
-            for i in range(BATCH_SIZE):
-                # Current State
+            for i in range(cfg.BATCH_SIZE):
                 s_nodes, s_H = batch_state[i]
                 n_nodes, n_edges = s_H.shape
                 batched_s_nodes[i, :n_nodes, :] = s_nodes.to(device)
@@ -460,29 +448,27 @@ def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
                 batched_ns_H[i, :nn_nodes, :nn_edges] = ns_H.to(device)
                 next_node_masks[i, :nn_nodes] = True
 
-            dummy_h = (torch.zeros(BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device),
-                       torch.zeros(BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device))
+            dummy_h = (torch.zeros(cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device),
+                       torch.zeros(cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device))
 
             # --- 5. ONE MASSIVE FORWARD PASS ---
             q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(batched_s_nodes, batched_s_H, dummy_h, mask=node_masks)
 
             with torch.no_grad():
-                nq_act, nq_item, nq_rot, nq_map, _ = target_net(batched_ns_nodes, batched_ns_H, dummy_h,
-                                                                mask=next_node_masks)
+                nq_act, nq_item, nq_rot, nq_map, _ = target_net(batched_ns_nodes, batched_ns_H, dummy_h, mask=next_node_masks)
 
                 # Vectorized Max Q-value extraction
                 max_nq_act = nq_act.max(dim=1)[0]
                 max_nq_item = nq_item.max(dim=1)[0]
                 max_nq_rot = nq_rot.max(dim=1)[0]
-                max_nq_map = nq_map.view(BATCH_SIZE, -1).max(dim=1)[0]
+                max_nq_map = nq_map.view(cfg.BATCH_SIZE, -1).max(dim=1)[0]
 
                 max_q = (max_nq_act + max_nq_item + max_nq_rot + max_nq_map) / 4.0
 
                 r_tensor = torch.tensor(batch_reward, dtype=torch.float32, device=device)
                 d_tensor = torch.tensor(batch_done, dtype=torch.float32, device=device)
 
-                # If done, target is just reward. Otherwise, reward + discounted future Q
-                target_vals = r_tensor + GAMMA * max_q * (1 - d_tensor)
+                target_vals = r_tensor + cfg.GAMMA * max_q * (1 - d_tensor)
 
             # --- 6. VECTORIZED LOSS CALCULATION ---
             actions_t = torch.tensor(batch_action, dtype=torch.long, device=device)
@@ -491,12 +477,12 @@ def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
             rot_idx = actions_t[:, 2]
             map_idx = actions_t[:, 3]
 
-            batch_arange = torch.arange(BATCH_SIZE, device=device)
+            batch_arange = torch.arange(cfg.BATCH_SIZE, device=device)
 
             chosen_q_act = q_act_v[batch_arange, act_idx]
             chosen_q_item = q_item_v[batch_arange, item_idx]
             chosen_q_rot = q_rot_v[batch_arange, rot_idx]
-            chosen_q_map = q_map_v.view(BATCH_SIZE, -1)[batch_arange, map_idx]
+            chosen_q_map = q_map_v.view(cfg.BATCH_SIZE, -1)[batch_arange, map_idx]
 
             loss = (criterion(chosen_q_act, target_vals) +
                     criterion(chosen_q_item, target_vals) +
@@ -513,15 +499,14 @@ def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
             current_loss = loss.item()
 
             # --- 8. TARGET UPDATE & SYNC ---
-            if updates_done % TARGET_UPDATE == 0:
+            if updates_done % cfg.TARGET_UPDATE == 0:
                 target_net.load_state_dict(policy_net.state_dict())
                 shared_policy.load_state_dict({k: v.cpu() for k, v in policy_net.state_dict().items()})
-                print(
-                    f"[Learner] Target updated & weights synced to CPU at {updates_done} updates. Loss: {current_loss:.4f}")
+                print(f"[Learner] Target updated & weights synced to CPU at {updates_done} updates. Loss: {current_loss:.4f}")
 
                 # --- 9. DASHBOARD UPDATE ---
                 current_time = time.time()
-                if current_time - last_json_update > UPDATE_INTERVAL_SEC:
+                if current_time - last_json_update > cfg.UPDATE_INTERVAL_SEC:
                     elapsed_interval = current_time - last_json_update
                     elapsed_tot = current_time - start_time_total
 
@@ -534,16 +519,22 @@ def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
                     ingestion_rate = steps_in_interval / elapsed_interval
 
                     # GPU Processing Rate (Samples per second)
-                    training_rate = updates_per_sec * BATCH_SIZE
+                    training_rate = updates_per_sec * cfg.BATCH_SIZE
 
                     # UTD Ratio (How many training samples processed per 1 new environment step)
                     utd_ratio = training_rate / ingestion_rate if ingestion_rate > 0 else 0.0
+
+                    # since macos isnt fully implemented we gotta do this
+                    try:
+                        current_qsize = exp_queue.qsize()
+                    except NotImplementedError:
+                        current_qsize = "N/A on Mac"
 
                     state_dict = {
                         "steps_ingested": total_steps_ingested,
                         "updates_done": updates_done,
                         "buffer_size": len(memory),
-                        "queue_size": exp_queue.qsize(),
+                        "queue_size": current_qsize,
                         "current_loss": round(current_loss, 4),
                         "updates_per_sec": round(updates_per_sec, 2),
                         "ingestion_rate": round(ingestion_rate, 2),
@@ -551,19 +542,18 @@ def learner_loop(shared_policy, exp_queue, device, cfg, num_actors):
                         "utd_ratio": round(utd_ratio, 2),
                         "elapsed_total": elapsed_tot,
                         "hyperparameters": hyperparameters,
-                        "num_actors": num_actors
+                        "num_actors": cfg.NUM_ACTORS
                     }
 
                     dump_dashboard_state(state_dict)
 
                     last_json_update = current_time
                     last_updates_count = updates_done
-                    last_steps_ingested = total_steps_ingested  # <-- Don't forget this!
+                    last_steps_ingested = total_steps_ingested
 
-                    # Autosave periodically
-                    if updates_done % (TARGET_UPDATE * 10) == 0:
-                        save_checkpoint(AUTOSAVE_PATH, policy_net, target_net, optimizer, memory, total_steps_ingested,
-                                        updates_done)
+                    #Autosave every once in a while
+                    if updates_done % (cfg.TARGET_UPDATE * 10) == 0:
+                        save_checkpoint(cfg.AUTOSAVE_PATH, policy_net, target_net, optimizer, memory, total_steps_ingested, updates_done)
 
 
 # this line should make sure that any not implemented MPS operations will throw CPU fallback errors instead of crashing the process
@@ -575,8 +565,7 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 if __name__ == '__main__':
     mp.set_start_method('spawn', force=True)
 
-    cfg = Config()
-
+    # cfg already instantiated at module level above
     cpu_device = torch.device("cpu")
     if torch.cuda.is_available():
         gpu_device = torch.device("cuda")
@@ -592,22 +581,30 @@ if __name__ == '__main__':
 
     experience_queue = mp.Queue(maxsize=5000)
 
-    NUM_ACTORS = 3
+    NUM_ACTORS = 20
     actor_processes = []
 
-    # 1. Start ALL actor processes first
-    for i in range(NUM_ACTORS):
+    # Start ALL actor processes based on Config
+    for i in range(cfg.NUM_ACTORS):
         p = mp.Process(target=actor_loop, args=(i, shared_policy_net, experience_queue, cpu_device, cfg))
         p.start()
         actor_processes.append(p)
 
     # 2. THEN start the learner loop on the main thread
     try:
-        learner_loop(shared_policy_net, experience_queue, gpu_device, cfg, NUM_ACTORS)
+        learner_loop(shared_policy_net, experience_queue, gpu_device, cfg)
     except KeyboardInterrupt:
-        print("\nShutting down workers...")
+        print("\n[Master] Ctrl+C detected. Asking Actors to pack up and delete their containers...")
+
+        # We DO NOT use p.terminate() here anymore.
+        # We wait for the Actors to run their `finally` blocks and close themselves.
         for p in actor_processes:
-            p.terminate()
+            p.join(timeout=10)  # Give them up to 10 seconds to delete the containers
+
+        # If any actor is totally frozen and didn't shut down after 10 seconds, THEN execute them
         for p in actor_processes:
-            p.join()
-        print("Shutdown complete.")
+            if p.is_alive():
+                print(f"[Master] Force terminating stuck process: {p.name}")
+                p.terminate()
+
+        print("[Master] All containers deleted. Shutdown complete.")
