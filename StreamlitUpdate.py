@@ -7,7 +7,7 @@ import datetime
 import glob
 
 # Configuration
-UPDATE_INTERVAL_SEC = 5
+UPDATE_INTERVAL_SEC = 0.1
 CSV_FILE = "training_log.csv"
 STATE_FILE = "dashboard_state.json"
 

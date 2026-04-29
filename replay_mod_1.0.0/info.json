@@ -1,0 +1,8 @@
+{
+  "name": "replay_mod",
+  "version": "1.0.0",
+  "title": "Replay Mod",
+  "author": "Patrick",
+  "factorio_version": "2.0",
+  "description": "Adds a button that prints a message when clicked."
+}

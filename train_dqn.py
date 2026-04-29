@@ -237,6 +237,7 @@ class MapScheduler:
 # 1. THE ACTOR LOOP (Runs in multiple processes)
 # ==========================================
 def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
+    torch.set_num_threads(1)
     print(f"[Actor {actor_id}] Booting up on {device}...")
 
     map_scheduler = MapScheduler(cfg.SAVES_POOL)

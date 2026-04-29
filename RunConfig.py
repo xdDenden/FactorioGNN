@@ -24,7 +24,7 @@ class Config:
     NUM_EPISODES: int = 50  # Total number of episodes to train the model
 
     # Distributed / Multiprocessing Settings
-    NUM_ACTORS: int = 25
+    NUM_ACTORS: int = 10
     CHUNK_SIZE: int = 32
     SYNC_INTERVAL: int = 128
 

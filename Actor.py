@@ -30,21 +30,32 @@ class ActorWorker:
         """Spins up the Docker container for this specific actor."""
         client = docker.from_env()
 
-        # 2. Ensure directories exist
+        # 2. Verzeichnisse sicherstellen
         os.makedirs(self.save_dir, exist_ok=True)
         os.makedirs(self.config_dir, exist_ok=True)
 
-        # INJECT THE MOD INTO THE actor'S FOLDER
+        # MOD INJEKTION
         actor_mods_dir = os.path.join(self.base_dir, "mods")
         os.makedirs(actor_mods_dir, exist_ok=True)
 
-        source_mod_dir = os.path.abspath("./rcon_bridge")
-        target_mod_dir = os.path.join(actor_mods_dir, "rcon_bridge")
+        # Liste der Mods, die kopiert werden sollen
+        # (Ordnername im Hauptverzeichnis : Name im Actor-Mod-Ordner)
+        mods_to_inject = {
+            "rcon_bridge": "rcon_bridge",
+            "replay_mod_1.0.0": "replay_mod_1.0.0"
+        }
 
-        # Copy the mod into this specific actor's isolated mods folder
-        if os.path.exists(target_mod_dir):
-            shutil.rmtree(target_mod_dir)  # Refresh it in case you made script changes
-        shutil.copytree(source_mod_dir, target_mod_dir)
+        for source_name, target_name in mods_to_inject.items():
+            source_path = os.path.abspath(f"./{source_name}")
+            target_path = os.path.join(actor_mods_dir, target_name)
+
+            if os.path.exists(source_path):
+                if os.path.exists(target_path):
+                    shutil.rmtree(target_path)
+                shutil.copytree(source_path, target_path)
+                print(f"[actor {self.actor_id}] Mod injiziert: {target_name}")
+            else:
+                print(f"[actor {self.actor_id}] WARNUNG: Mod-Quelle nicht gefunden: {source_path}")
 
         # 3. Inject the RCON password BEFORE the container boots
         rconpw_path = os.path.join(self.config_dir, "rconpw")
@@ -78,7 +89,7 @@ class ActorWorker:
         # by default it should remove all of them
         if cfg.VERBOSE == True:
             self.container = client.containers.run(
-                "factoriotools/factorio",
+                "factoriotools/factorio:2.0.72",
                 name=self.container_name,
                 ports={
                     '27015/tcp': self.rcon_port,
@@ -90,7 +101,7 @@ class ActorWorker:
             )
         else:
             self.container = client.containers.run(
-                "factoriotools/factorio",
+                "factoriotools/factorio:2.0.72",
                 name=self.container_name,
                 ports={
                     '27015/tcp': self.rcon_port,
