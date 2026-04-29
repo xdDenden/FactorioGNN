@@ -58,7 +58,7 @@ def get_base64_image(machine_name):
 
     try:
         print(f"Downloading & Embedding: {formatted_name}...")
-        req = urllib.request.Request(remote_url, headers={'User-Agent': 'Mozilla/5.0'})
+        req = urllib.request.Request(remote_url, headers={'User-actor': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, context=ctx) as response:
             image_data = response.read()
             # Encode to base64

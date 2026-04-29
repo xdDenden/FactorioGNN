@@ -23,41 +23,16 @@ While Hopkins' research highlights the limitations of frontier models (like Clau
 * **FLE Paper:** [Factorio Learning Environment (arXiv)](https://arxiv.org/abs/2503.09617)
 
 ## Installation
-
-* **Windows and Mac OS:**
-    * python version 3.10.X or later
-    * pip install numpy, pytorch, factorio-rcon-py, plotly, tqdm, timeit
-    * Factorio Headless Linux Client https://www.factorio.com/download
-    * Docker or Docker Desktop (WSL2 recommended for Windows)
-    * Choose a location on your computer where the server's data (saves, mods, config) will be permanently stored. This location is called the HOST PATH.
-        * Windows: A simple path like C:\factorio_data is recommended
-        * Linux/macOS: A common path is /opt/factorio or /home/user/factorio-server
-    * Use the command below, replacing the placeholder [HOST_PATH] with the actual path you chose
-    * For Windows use: `docker run -d -p 34197:34197/udp -p 27015:27015/tcp -v C:/factorio_data:/factorio --name factorio --restart=unless-stopped factoriotools/factorio`
-    * For Mac OS/Linux use: `docker run -d \
-  -p 34197:34197/udp \
-  -p 27015:27015/tcp \
-  -v [HOST_PATH]:/factorio \
-  --name factorio \
-  --restart=unless-stopped \
-  factoriotools/factorio`
-`
-    * Finally Clone the repository and add the rcon_bridge mod to the headless client in the folder you defined and to your factorio installation if you want to join to observe the AI via localhost:
-* **Linux:** (hasnt been tested but should work the same)
-
-* **Optional:**
-    * You can download yEd to visualize the whole factory the way the AI sees it. This can be useful for determining issues and misinterpretations and to view the progress of the AI without joining the server/ opening the game.
-
+We currently do not recommend installation. Were working on major changes and upgrades.
+If you do want to get this running the main file to get running is train_dqn.py
+You need docker (also we recommend Streamlit to run streamlitupdate.py) and all the python packages within the code.
 
 ## Usage
-* main.py uses the finished jimbo_dqn_weights.pth to inference and select actions to steer the AI.
-* Train_dqn.py trains the AI based on parameters set at the top and in config.py.
-* Plotting.py can show you the relevant scores of the collected data during training.
-* Graph_utils.py can be used to visualize the factory the AI built during training or inferencing. Also this can be used to visualize any factory as long as you put your savegame onto the server. However this needs the optional yEd to be installed, to visualize the graphml files.
+
+
 ## Project Structure
 
-* [TODO: Describe key directories]
-* [TODO: See if releases/packages are doable that dont have to be built]
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

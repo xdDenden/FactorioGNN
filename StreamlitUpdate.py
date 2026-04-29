@@ -33,15 +33,15 @@ while True:
             except json.JSONDecodeError:
                 pass
 
-        # Determine number of agents dynamically (fallback to counting files if learner hasn't posted yet)
+        # Determine number of actors dynamically (fallback to counting files if learner hasn't posted yet)
         num_actors = state.get("num_actors", 0)
         if num_actors == 0:
-            agent_files = glob.glob("agent_*_state.json")
-            num_actors = len(agent_files)
+            actor_files = glob.glob("actor_*_state.json")
+            num_actors = len(actor_files)
 
         if state or num_actors > 0:
             # 2. Create Dynamic Tabs
-            tab_names = ["Overall Progress"] + [f"Agent {i}" for i in range(num_actors)]
+            tab_names = ["Overall Progress"] + [f"actor {i}" for i in range(num_actors)]
             tabs = st.tabs(tab_names)
 
             # ==========================================
@@ -51,12 +51,15 @@ while True:
                 if state:
                     st.header("Learner Status")
 
-                    c1, c2, c3, c4 = st.columns(4)
+                    c1, c2, c3, c4, c5 = st.columns(5)
                     c1.metric("Total Steps Ingested", f"{state.get('steps_ingested', 0):,}")
                     c2.metric("Network Updates Done", f"{state.get('updates_done', 0):,}")
-                    c3.metric("Buffer Size", f"{state.get('buffer_size', 0):,}")
-                    c4.metric("Current Loss", state.get("current_loss", 0.0))
+                    c3.metric("Replay Buffer", f"{state.get('buffer_size', 0):,}")
 
+                    # Add the Queue Size metric
+                    c4.metric("MP Queue Size", f"{state.get('queue_size', 0):,}")
+
+                    c5.metric("Current Loss", state.get("current_loss", 0.0))
                     st.subheader("Performance")
                     t1, t2, t3 = st.columns(3)
                     # Labelled explicitly as Iterations / Sec
@@ -65,6 +68,34 @@ while True:
 
                     queue_health = "Healthy" if state.get('updates_per_sec', 0) > 0 else "Stalled"
                     t3.metric("Training Status", queue_health)
+
+                    st.divider()
+
+                    # --- NEW: BOTTLENECK ANALYSIS ---
+                    st.subheader("Bottleneck Analysis (System Flow)")
+
+                    b1, b2, b3 = st.columns(3)
+
+                    ingest_rate = state.get("ingestion_rate", 0)
+                    train_rate = state.get("training_rate", 0)
+                    utd = state.get("utd_ratio", 0)
+
+                    b1.metric("Actor Ingestion Rate", f"{ingest_rate} steps/sec",
+                              help="Global speed of all Actors combined.")
+                    b2.metric("GPU Training Rate", f"{train_rate} samples/sec",
+                              help="Speed the GPU is pulling from the Replay Buffer.")
+
+                    # Determine Bottleneck Status dynamically
+                    if utd > 8:
+                        bottleneck = "🔴 Actor Limited (GPU Starving)"
+                    elif state.get("queue_size", 0) > 100:
+                        bottleneck = "🔴 Learner Limited (CPU Waiting)"
+                    else:
+                        bottleneck = "🟢 Balanced Pipeline"
+
+                    b3.metric("Update-To-Data (UTD) Ratio", f"{utd}x", delta=bottleneck, delta_color="off")
+
+                    st.divider()
 
                     col1, col2 = st.columns(2)
 
@@ -86,7 +117,7 @@ while True:
                 if os.path.exists(CSV_FILE):
                     try:
                         df = pd.read_csv(CSV_FILE)
-                        st.dataframe(df.tail(10), use_container_width=True)
+                        st.dataframe(df.tail(10), width="stretch")
 
                         chart_col1, chart_col2 = st.columns(2)
                         with chart_col1:
@@ -105,38 +136,38 @@ while True:
                     st.info("No training CSV found yet. Actors might still be playing their first maps.")
 
             # ==========================================
-            # TABS 1..N: INDIVIDUAL AGENTS
+            # TABS 1..N: INDIVIDUAL actorS
             # ==========================================
             max_timesteps = state.get("hyperparameters", {}).get("MAX_TIMESTEPS", 1000) if state else 1000
 
             for i in range(num_actors):
                 with tabs[i + 1]:
-                    agent_file = f"agent_{i}_state.json"
-                    if os.path.exists(agent_file):
+                    actor_file = f"actor_{i}_state.json"
+                    if os.path.exists(actor_file):
                         try:
-                            with open(agent_file, 'r') as f:
-                                agent_state = json.load(f)
+                            with open(actor_file, 'r') as f:
+                                actor_state = json.load(f)
 
-                            st.header(f"Live Feed: Agent {i}")
+                            st.header(f"Live Feed: actor {i}")
 
                             # Expanded to 4 columns to fit the new metric
                             ac1, ac2, ac3, ac4 = st.columns(4)
-                            ac1.metric("Current Map", agent_state.get("current_map", "Unknown"))
-                            ac2.metric("Epsilon (Exploration)", f"{agent_state.get('epsilon', 0.0):.4f}")
-                            ac3.metric("Total Actor Steps", f"{agent_state.get('total_actor_steps', 0):,}")
-                            ac4.metric("Iterations / Sec", agent_state.get("steps_per_sec", 0.0))
+                            ac1.metric("Current Map", actor_state.get("current_map", "Unknown"))
+                            ac2.metric("Epsilon (Exploration)", f"{actor_state.get('epsilon', 0.0):.4f}")
+                            ac3.metric("Total Actor Steps", f"{actor_state.get('total_actor_steps', 0):,}")
+                            ac4.metric("Iterations / Sec", actor_state.get("steps_per_sec", 0.0))
 
-                            current_step = agent_state.get("step", 0)
-                            st.metric("Current Episode Reward", round(agent_state.get("episode_reward", 0.0), 3))
+                            current_step = actor_state.get("step", 0)
+                            st.metric("Current Episode Reward", round(actor_state.get("episode_reward", 0.0), 3))
 
                             # Safe progress bar
                             progress_val = max(0.0, min(current_step / max_timesteps, 1.0))
                             st.progress(progress_val, text=f"Episode Progress (Step {current_step} / {max_timesteps})")
 
                         except json.JSONDecodeError:
-                            st.warning(f"Syncing data for Agent {i}...")
+                            st.warning(f"Syncing data for actor {i}...")
                     else:
-                        st.info(f"Waiting for Agent {i} to start exploring and report in...")
+                        st.info(f"Waiting for actor {i} to start exploring and report in...")
 
         else:
             st.warning("Waiting for live data. Make sure train_dqn.py is running...")
