@@ -3,9 +3,7 @@ from typing import Any
 
 import rcon_bridge.rcon_bridge
 
-# ==========================================
 #              HELPER FUNCTIONS
-# ==========================================
 
 def get_search_coords(x, y, rotation, distance=1):
     """Return the coordinates at a certain distance in the direction of rotation."""
@@ -28,18 +26,14 @@ def is_point_in_selection_box(px, py, selection_box):
             left_top['y'] <= py <= right_bottom['y'])
 
 
-# ==========================================
 #           LOGIC FINDER FUNCTIONS
-# ==========================================
 
 def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotation=False, check_selection_box=False,
                is_underground_belt=False, is_inserter=False, is_pipe_to_ground=False, is_burner_miner=False):
     """Generic edge detection for Belts, Inserters, and simple connections."""
     edges = []
 
-    # ==========================================
     # 1. INSERTER LOGIC (Optimized)
-    # ==========================================
     if is_inserter:
         # PRE-FILTER: Create a list of only things an inserter can actually touch.
         # This removes trees, walls, poles, and landmines from the inner loop calculations.
@@ -107,9 +101,7 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
                               "to_y": behind_entity['y']})
         return edges
 
-    # ==========================================
     # 2. PIPE TO GROUND LOGIC (Coordinate Lookup - Already Optimal)
-    # ==========================================
     if is_pipe_to_ground:
         coord_lookup = {(m['x'], m['y']): m for m in machine_list}
         for machine in machine_list:
@@ -144,9 +136,7 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
                         break
         return edges
 
-    # ==========================================
     # 3. UNDERGROUND BELT LOGIC (Coordinate Lookup - Already Optimal)
-    # ==========================================
     if is_underground_belt:
         coord_lookup = {(m['x'], m['y']): m for m in machine_list}
         for machine in machine_list:
@@ -163,9 +153,7 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
                         break
         return edges
 
-    # ==========================================
     # 4. BURNER MINER LOGIC (Optimized)
-    # ==========================================
     if is_burner_miner:
         # PRE-FILTER: Only look at valid output targets (Furnaces, Belts)
         valid_targets = [m for m in machine_list if m['machine_name'] in check_to]
@@ -190,9 +178,7 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
                     break
         return edges
 
-    # ==========================================
     # 5. STANDARD LOGIC (Coordinate Lookup - Already Optimal)
-    # ==========================================
     coord_lookup = {(m['x'], m['y']): m for m in machine_list}
 
     for machine in machine_list:
@@ -327,7 +313,7 @@ def find_power_edges(machine_list):
     return edges
 
 
-# --- FLUID HELPERS (Specific Machines) ---
+# FLUID HELPERS (Specific Machines)
 # Keeping these separate to preserve the specific offset logic provided in the prompt
 
 def _find_machine_fluid_edges(machine_list, target_name, config_map):
@@ -517,9 +503,9 @@ def find_ground_pipe_pipe_edges(machine_list):
     return _find_machine_fluid_edges(machine_list, 'pipe-to-ground', config)
 
 
-# ==========================================
-#              MAIN FUNCTION
-# ==========================================
+#
+# MAIN FUNCTION
+#
 
 def translateEntitesToEdges(reciever) -> list[Any] | None:
     # 1. Fetch Data
@@ -531,7 +517,7 @@ def translateEntitesToEdges(reciever) -> list[Any] | None:
     # 2. Consolidate Edge Finding
     all_edges = []
 
-    # --- Transport & Belts ---
+    # Transport & Belts
     #print("\nProcessing Belts...")
     all_edges.extend(
         find_edges(machines, check_from=('transport-belt', 'fast-transport-belt', 'express-transport-belt'),
@@ -553,7 +539,7 @@ def translateEntitesToEdges(reciever) -> list[Any] | None:
 
     all_edges.extend(find_belt_to_splitter_edges(machines))
 
-    # --- Inserters ---
+    # Inserters
     #print("\nProcessing Inserters...")
     all_edges.extend(find_edges(machines,
                                 check_from=('inserter', 'fast-inserter', 'long-handed-inserter', 'stack-inserter',
@@ -561,7 +547,7 @@ def translateEntitesToEdges(reciever) -> list[Any] | None:
                                 check_to=None,  # Ignored inside is_inserter logic
                                 is_inserter=True))
 
-    # --- Fluids (Pipes & Machines) ---
+    # Fluids (Pipes & Machines)
     #print("\nProcessing Fluids...")
     all_edges.extend(find_edges(machines, check_from=('pipe-to-ground',),
                                 check_to=('pipe-to-ground',), max_distance=10, is_pipe_to_ground=True))
@@ -576,7 +562,7 @@ def translateEntitesToEdges(reciever) -> list[Any] | None:
     all_edges.extend(find_pump_pipe_edges(machines))
     all_edges.extend(find_pumpjack_pipe_edges(machines))
 
-    # --- Power ---
+    # Power
     #print("\nProcessing Power...")
     all_edges.extend(find_power_edges(machines))
 

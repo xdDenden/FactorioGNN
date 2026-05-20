@@ -39,7 +39,7 @@ class FactorioEnv:
         )
         self.current_bounds = None
 
-        # --- RL State Tracking ---
+        # RL State Tracking
         self.milestones = set()
         self.max_edges_seen = 0
         self.max_total_production_seen = 0
@@ -172,7 +172,7 @@ class FactorioEnv:
         should_send_rcon = True
         log_msg = ""
 
-        # --- 1. Action Logic ---
+        # 1. Action Logic
         if action_idx == 0:  # Action: MOVE_TO
             if self.move_state['active']:
                 # IGNORE NEW MOVE COMMANDS while moving
@@ -215,7 +215,7 @@ class FactorioEnv:
         else:
             next_obs = self._last_obs
 
-        # --- 3. Update Movement State (ALWAYS runs) ---
+        # 3. Update Movement State (ALWAYS runs)
         # This tracks the movement initiated in previous steps, regardless of what we did this step.
         if self.move_state['active']:
             self.move_state['timer'] += 1
@@ -239,11 +239,11 @@ class FactorioEnv:
         reward = 0.0
         done = False
 
-        # --- A. Validation & Punishment ---
+        # Validation & Punishment
         if "FAILED" in log_msg or "Cannot" in log_msg:
             reward -= 0.2
 
-        # --- B. Idle Punishment Logic ---
+        # Idle Punishment Logic
         is_doing_something_useful = False
 
         if action_idx != 0:
@@ -258,7 +258,7 @@ class FactorioEnv:
             if self.steps_without_action > 5:
                 reward -= 0.5
 
-        # --- C. Crafting Reward (Modified with Hard Cap) ---
+        # Crafting Reward (Modified with Hard Cap)
         if action_idx == 2:  # craft action
             # HARD CAP: 500 items.
             # After 500, the reward drops to 0, forcing the actor to Automate.
@@ -272,7 +272,7 @@ class FactorioEnv:
                 # aggressively discourage hand-crafting late game, but 0 is usually safer.
                 pass
 
-                # --- D. Production Score (Anti-Hacking) ---
+                # Production Score (Anti-Hacking)
         current_total_production = 0
         for e in self._last_raw_entities:
             current_total_production += int(e.get('products_finished', 0))
@@ -282,7 +282,7 @@ class FactorioEnv:
             reward += (prod_delta * 1.0)
             self.max_total_production_seen = current_total_production
 
-        # --- E. Connectivity / Edges ---
+        # Connectivity / Edges
         alpha = 0.1
         k = 5.0
         if self._current_edge_count > self.max_edges_seen:
@@ -292,7 +292,7 @@ class FactorioEnv:
                 reward += k / (1 + alpha * n)
             self.max_edges_seen = self._current_edge_count
 
-        # --- F. Milestones ---
+        # Milestones
         inv = self._last_raw_player.get("inventory", [])
         for item in inv:
             name = item.get("name", "unknown")

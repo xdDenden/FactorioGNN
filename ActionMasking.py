@@ -8,9 +8,7 @@ from OrePatchDetector import OrePatchDetector
 # Import mappings
 from mappings import ITEM_MAP, ACTION_MAP, MACHINE_NAME_MAP, INSERT_MAP
 
-# ==========================================
 #          Directly Usable Recipes
-# ==========================================
 
 RECIPES = {
     # Buildings & Storage
@@ -99,9 +97,7 @@ MINING_DRILLS = {"burner-mining-drill", "electric-mining-drill"}
 OIL_EXTRACTORS = {"pumpjack"}
 
 
-# ==========================================
 #           HELPER FUNCTIONS
-# ==========================================
 
 def world_to_grid(x: float, y: float, bounds: Tuple[int, int, int, int], grid_steps: int = 17) -> Tuple[int, int]:
     """
@@ -160,9 +156,9 @@ def is_player_near_ore_patch_center(px, py, patches, distance_threshold=7.0):
     return False
 
 
-# ==========================================
-#           CORE MASKING LOGIC
-# ==========================================
+
+# CORE MASKING LOGIC
+
 
 def get_action_masks(
         entities: List[Dict],
@@ -208,7 +204,7 @@ def get_action_masks(
     # Convert available items to set for O(1) lookup
     unlocked_set = set(available_items) if available_items else set()
 
-    # --- Pre-calculate Spatial State ---
+    # Pre-calculate Spatial State
     # 1. Occupied Grid (For Build)
     entity_grid = np.zeros((grid_steps, grid_steps), dtype=bool)
 
@@ -231,13 +227,13 @@ def get_action_masks(
     flat_empty_mask = ~flat_entity_mask
     flat_insertable_mask = insertable_grid.flatten()
 
-    # --- Pre-calculate Grid-to-World steps ---
+    # Pre-calculate Grid-to-World steps
     min_x, max_x, min_y, max_y = bounds
     step_x = (max_x - min_x) / grid_steps
     step_y = (max_y - min_y) / grid_steps
     flat_insertable_mask = insertable_grid.flatten()
 
-    # --- Load Patches (if not provided) ---
+    # Load Patches (if not provided)
     loaded_patches = []
     if patches is not None:
         loaded_patches = patches
@@ -256,7 +252,7 @@ def get_action_masks(
         except Exception as e:
             print(f"Error loading patches: {e}")
 
-    # --- Load Ore Map for Crude Oil ---
+    # Load Ore Map for Crude Oil
     crude_oil_coords = []
     try:
         with open('ore_map.json', 'r') as f:
@@ -271,7 +267,7 @@ def get_action_masks(
     # Detector instance
     detector = OrePatchDetector(ore_data=[])
 
-    # --- Pre-calculate Reach Mask ---
+    # Pre-calculate Reach Mask
     # Which grid cells are reachable?
     reach_grid = np.zeros((grid_steps, grid_steps), dtype=bool)
     min_x, max_x, min_y, max_y = bounds
@@ -288,16 +284,12 @@ def get_action_masks(
 
     flat_reach_mask = reach_grid.flatten()
 
-    # ==========================================
     # 0. ACTION: NONE (0)
-    # ==========================================
     # action_mask[0] = 1.0  # Always legal to do nothing
     # item_mask[0, :] = 1.0  # Args irrelevant
     # spatial_mask[0, :] = 1.0
 
-    # ==========================================
     # 0. ACTION: MOVE_TO (0)
-    # ==========================================
     # Always legal to try moving (pathfinding handles the rest)
     if move_state and move_state['active']:
         action_mask[0] = 0.0
@@ -308,9 +300,7 @@ def get_action_masks(
     item_mask[0, 0] = 1.0
     spatial_mask[0, :] = 1.0
 
-    # ==========================================
     # 1. ACTION: MINE (1)
-    # ==========================================
     can_mine_any = False
 
     for gy in range(grid_steps):
@@ -348,9 +338,7 @@ def get_action_masks(
 
     item_mask[1, :] = 1.0  # Item arg irrelevant for mining
 
-    # ==========================================
     # 2. ACTION: CRAFT (2)
-    # ==========================================
     # Legal IF: Player has ingredients for at least one recipe
     # TODO: Consider which buildings can be placed on which surface (mining drills need ore etc)
     can_craft_any = False
@@ -377,9 +365,7 @@ def get_action_masks(
         action_mask[2] = 1.0
         spatial_mask[2, :] = 1.0  # Location irrelevant for crafting
 
-    # ==========================================
     # 3. ACTION: BUILD (3)
-    # ==========================================
     # Legal IF: Player has the item AND target is empty AND within reach
     # SPECIAL CASE: Mining drills require player near ore patch center AND build location in ore patch
     can_build_any = False
@@ -463,9 +449,7 @@ def get_action_masks(
         action_mask[3] = 1.0
         spatial_mask[3, :] = combined_spatial.astype(np.float32)
 
-    # ==========================================
     # 4. ACTION: INSERT_INTO (4)
-    # ==========================================
     # Legal IF: Entity is in INSERT_MAP + Reachable
     has_items = sum(inventory.values()) > 0
     valid_insert_targets = flat_insertable_mask & flat_reach_mask
@@ -479,18 +463,14 @@ def get_action_masks(
                 iid = ITEM_MAP.get(item_name, 0)
                 item_mask[4, iid] = 1.0
 
-    # ==========================================
     # 5. ACTION: TAKE (5)
-    # ==========================================
     # Legal IF: Entity at target (to take from)
     if np.any(valid_insert_targets):
         action_mask[5] = 1.0
         spatial_mask[5, :] = valid_insert_targets.astype(np.float32)
         item_mask[5, :] = 1.0  # Item arg irrelevant
 
-    # ==========================================
     # 6. ACTION: CHANGE_RECIPE (6)
-    # ==========================================
     # Legal IF: Entity at target
     if np.any(valid_insert_targets):
         action_mask[6] = 1.0

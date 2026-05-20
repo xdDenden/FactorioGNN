@@ -10,7 +10,7 @@ from mappings import (
 )
 
 
-# --- Mappers ---
+# Mappers
 
 def map_rotation(rot: Optional[int]) -> Optional[int]:
     if rot is None:
@@ -87,7 +87,7 @@ def map_items(char_info: CharInfo, bounds: Tuple[int, int, int, int]) -> Dict[st
     }
 
 
-# --- Feature Transformation ---
+# Feature Transformation
 
 def compute_bounds(entities: List[Entity], char_info: Optional[CharInfo] = None, radius: int = 64) -> Tuple[
     int, int, int, int]:

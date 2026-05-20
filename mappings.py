@@ -347,7 +347,7 @@ def get_available_items(unlocked_research: Union[Dict[str, bool], List[Dict[str,
 
 
 
-# --- REVERSE MAPPINGS (For Jimbo/Logging) ---
+# REVERSE MAPPINGS (For Jimbo/Logging)
 # These allow O(1) lookup from ID -> Name without searching
 ID_TO_ACTION = {v: k for k, v in ACTION_MAP.items()}
 ID_TO_ITEM = {v: k for k, v in ITEM_MAP.items()}

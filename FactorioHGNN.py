@@ -14,7 +14,7 @@ from mappings import (
     ITEM_MAP, ACTION_MAP
 )
 
-# --- Category Size Definitions ---
+# Category Size Definitions
 N_MACHINE_TYPES = max(MACHINE_NAME_MAP.values()) + 1
 N_STATUS_TYPES = max(STATUS_MAP.values()) + 1
 N_MINING_TARGETS = max(MINING_TARGET_MAP.values()) + 1
@@ -23,7 +23,7 @@ N_ITEM_TYPES = max(ITEM_MAP.values()) + 1
 N_ACTIONS = max(ACTION_MAP.values()) + 1
 N_ROTATIONS = 4 + 1
 
-# --- Feature Dimension ---
+# Feature Dimension
 N_CONTINUOUS_FEATURES = 5
 FEATURE_DIM = (
         N_CONTINUOUS_FEATURES +

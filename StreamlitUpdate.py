@@ -44,9 +44,9 @@ while True:
             tab_names = ["Overall Progress"] + [f"actor {i}" for i in range(num_actors)]
             tabs = st.tabs(tab_names)
 
-            # ==========================================
+
             # TAB 0: OVERALL PROGRESS (Learner)
-            # ==========================================
+
             with tabs[0]:
                 if state:
                     st.header("Learner Status")
@@ -58,7 +58,7 @@ while True:
                     c3.metric("Replay Buffer", f"{state.get('buffer_size', 0):,}",
                               help="The amount of steps inside the replay buffer ready for training.")
 
-                    # --- FIX 1: Only use the safe string-formatting ---
+                    # Only use the safe string-formatting
                     raw_qsize = state.get('queue_size', 0)
                     display_qsize = f"{raw_qsize:,}" if isinstance(raw_qsize, (int, float)) else str(raw_qsize)
                     c4.metric("MP Queue Size", display_qsize,
@@ -76,7 +76,7 @@ while True:
 
                     st.divider()
 
-                    # --- BOTTLENECK ANALYSIS ---
+                    # BOTTLENECK ANALYSIS
                     st.subheader("Bottleneck Analysis (System Flow)")
 
                     b1, b2, b3 = st.columns(3)
@@ -90,7 +90,7 @@ while True:
                     b2.metric("GPU Training Rate", f"{train_rate} samples/sec",
                               help="Speed the GPU is pulling from the Replay Buffer. Updates/Sec * Batch Size.")
 
-                    # --- FIX 2: Safely check queue size for Bottleneck ---
+                    # Safely check queue size for Bottleneck
                     safe_qsize_for_math = raw_qsize if isinstance(raw_qsize, (int, float)) else 0
 
                     # Determine Bottleneck Status dynamically
@@ -145,9 +145,7 @@ while True:
                 else:
                     st.info("No training CSV found yet. Actors might still be playing their first maps.")
 
-            # ==========================================
             # TABS 1..N: INDIVIDUAL ACTORS
-            # ==========================================
             max_timesteps = state.get("hyperparameters", {}).get("MAX_TIMESTEPS", 1000) if state else 1000
 
             for i in range(num_actors):

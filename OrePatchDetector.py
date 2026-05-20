@@ -110,7 +110,7 @@ class OrePatchDetector:
         return matches
 
 
-# Example usage:
+# Main
 if __name__ == "__main__":
 
     receiver = Rcon_reciever("localhost", "eenie7Uphohpaim", 27015)

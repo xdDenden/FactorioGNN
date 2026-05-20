@@ -8,14 +8,14 @@ import ssl
 import base64
 from typing import Union, Sequence, List, Dict, Any
 
-# --- IMPORTS FOR LIVE FETCHING ---
+# IMPORTS FOR LIVE FETCHING
 try:
     import Edging
     from rcon_bridge.rcon_bridge import Rcon_reciever
 except ImportError:
     print("Warning: Could not import 'Edging' or 'rcon_bridge'. Ensure they are in the python path.")
 
-# --- CONFIG ---
+# CONFIG
 # Factorio tile = 1 unit. Scale up for graph pixels.
 scale_factor = 64
 
@@ -179,7 +179,7 @@ def create_factorio_graphml(nodes: List[Dict[str, Any]], edges: List[Dict[str, A
       </data>
     </edge>"""
 
-    # --- RESOURCES BLOCK ---
+    # RESOURCES BLOCK
     resources_xml = "<data key=\"d_resources\">\n<y:Resources>\n"
     for name, b64_data in resources_map.items():
         if b64_data:
@@ -192,7 +192,7 @@ def create_factorio_graphml(nodes: List[Dict[str, Any]], edges: List[Dict[str, A
 </graphml>
 """ % resources_xml
 
-    # --- WRITE FILE ---
+    # WRITE FILE
     with open(file_name, 'w') as f:
         f.write(header + nodes_xml + edges_xml + footer)
 

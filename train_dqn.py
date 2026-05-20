@@ -110,7 +110,7 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
     act_mask, item_mask, space_mask = masks
 
     if random.random() < epsilon:
-        # --- MASKED RANDOM EXPLORATION ---
+        # MASKED RANDOM EXPLORATION
 
         # 1. Select Action from valid indices
         valid_actions = np.nonzero(act_mask)[0]
@@ -133,7 +133,7 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
         return act, item, rot, heatmap_idx, h_next
 
     else:
-        # --- MASKED GREEDY EXPLOITATION ---
+        # MASKED GREEDY EXPLOITATION
         with torch.no_grad():
             q_act, q_item, q_rot, q_map, h_next = model(node_feats, H, hidden_state)
 
@@ -233,16 +233,14 @@ class MapScheduler:
     #main training loop
 
 
-# ==========================================
 # 1. THE ACTOR LOOP (Runs in multiple processes)
-# ==========================================
 def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
     print(f"[Actor {actor_id}] Booting up on {device}...")
 
     map_scheduler = MapScheduler(cfg.SAVES_POOL)
     actor = Actor.ActorWorker(actor_id)
 
-    # --- Local Replica ---
+    # Local Replica
     # To prevent lock contention, actors infer from a local copy.
     local_policy = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
 
@@ -252,7 +250,7 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
     # Simple global step counter for epsilon decay
     actor_steps = 0
 
-    # --- Timing trackers for Iterations / Sec ---
+    # Timing trackers for Iterations / Sec
     last_log_time = time.time()
     last_log_steps = 0
 
@@ -332,7 +330,7 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                     steps_since_sync += 1
                     actor_steps += 1
 
-                    # --- Calculate Iterations / Sec and update dashboard ---
+                    # Calculate Iterations / Sec and update dashboard
                     if t % 50 == 0 or done:
                         current_time = time.time()
                         elapsed = current_time - last_log_time
@@ -360,9 +358,7 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
         actor.stop()
 
 
-# ==========================================
 # 2. THE LEARNER LOOP (Runs on Main Thread)
-# ==========================================
 def learner_loop(shared_policy, exp_queue, device, cfg):
     print(f"[Learner] Starting up on {device}...")
 
@@ -416,14 +412,14 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
             transitions = memory.sample(cfg.BATCH_SIZE)
             batch_state, batch_action, batch_reward, batch_next_state, batch_done = zip(*transitions)
 
-            # --- 1. Find Max Dimensions for Current Batch ---
+            # 1. Find Max Dimensions for Current Batch
             max_nodes = max(state[0].shape[0] for state in batch_state)
             max_edges = max(state[1].shape[1] for state in batch_state)
 
             max_next_nodes = max(n_state[0].shape[0] for n_state in batch_next_state)
             max_next_edges = max(n_state[1].shape[1] for n_state in batch_next_state)
 
-            # --- 2. Dynamically Infer Feature Dimension ---
+            # 2. Dynamically Infer Feature Dimension
             feature_dim = batch_state[0][0].shape[1]
 
             batched_s_nodes = torch.zeros((cfg.BATCH_SIZE, max_nodes, feature_dim), device=device)
@@ -451,7 +447,7 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
             dummy_h = (torch.zeros(cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device),
                        torch.zeros(cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device))
 
-            # --- 5. ONE MASSIVE FORWARD PASS ---
+            # 5. ONE MASSIVE FORWARD PASS
             q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(batched_s_nodes, batched_s_H, dummy_h, mask=node_masks)
 
             with torch.no_grad():
@@ -470,7 +466,7 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
 
                 target_vals = r_tensor + cfg.GAMMA * max_q * (1 - d_tensor)
 
-            # --- 6. VECTORIZED LOSS CALCULATION ---
+            # 6. VECTORIZED LOSS CALCULATION
             actions_t = torch.tensor(batch_action, dtype=torch.long, device=device)
             act_idx = actions_t[:, 0]
             item_idx = actions_t[:, 1]
@@ -489,7 +485,7 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
                     criterion(chosen_q_rot, target_vals) +
                     criterion(chosen_q_map, target_vals))
 
-            # --- 7. BACKPROPAGATION ---
+            # 7. BACKPROPAGATION
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
@@ -498,13 +494,13 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
             updates_done += 1
             current_loss = loss.item()
 
-            # --- 8. TARGET UPDATE & SYNC ---
+            # 8. TARGET UPDATE & SYNC
             if updates_done % cfg.TARGET_UPDATE == 0:
                 target_net.load_state_dict(policy_net.state_dict())
                 shared_policy.load_state_dict({k: v.cpu() for k, v in policy_net.state_dict().items()})
                 print(f"[Learner] Target updated & weights synced to CPU at {updates_done} updates. Loss: {current_loss:.4f}")
 
-                # --- 9. DASHBOARD UPDATE ---
+                # 9. DASHBOARD UPDATE
                 current_time = time.time()
                 if current_time - last_json_update > cfg.UPDATE_INTERVAL_SEC:
                     elapsed_interval = current_time - last_json_update

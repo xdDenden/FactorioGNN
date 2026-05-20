@@ -206,7 +206,7 @@ def play():
             time.sleep(5)
             continue
 
-        # --- GAMEPLAY PHASE ---
+        # GAMEPLAY PHASE
         obs = env.reset()
         if obs is None: continue
 

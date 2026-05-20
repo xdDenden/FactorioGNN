@@ -1,7 +1,7 @@
 ﻿from dataclasses import dataclass
 from typing import Dict, Callable, List, Optional, Any
 
-# --- Dataclasses ---
+# Dataclasses
 
 @dataclass
 class Entity:
@@ -35,7 +35,7 @@ class BurnerMiningDrill(Entity):
     status: Optional[int] = None
     mining_target: Optional[str] = None
 
-# --- Parser registry ---
+# Parser registry
 Parser = Callable[[str, Dict[str, str]], Entity]
 parsers: Dict[str, Parser] = {}
 
@@ -57,7 +57,7 @@ def to_bool(v: Any) -> bool:
         return v
     return str(v).lower() in ("true", "1")
 
-# --- Parsers ---
+# Parsers
 
 def default_parser(t: str, kv: Dict[str, str]) -> Entity:
     """
