@@ -8,7 +8,7 @@ from OrePatchDetector import OrePatchDetector
 # Import mappings
 from mappings import ITEM_MAP, ACTION_MAP, MACHINE_NAME_MAP, INSERT_MAP
 
-#          Directly Usable Recipes
+# Directly Usable Recipes
 
 RECIPES = {
     # Buildings & Storage
@@ -82,7 +82,7 @@ RECIPES = {
     "logistic-science-pack": {"transport-belt": 1, "inserter": 1},
     "chemical-science-pack": {"advanced-circuit": 3, "engine-unit": 2, "sulfur": 1},
 
-    # --- RECIPES THAT CANNOT BE HAND CRAFTED BUT CAN BE SET IN MACHINES ---
+    # RECIPES THAT CANNOT BE HAND CRAFTED BUT CAN BE SET IN MACHINES
     # These are needed for ACTION 6 (Change Recipe), but strictly should not be in ACTION 2 (Craft)
     # The logic below handles this by checking if ingredients are in inventory.
     # Since you can't hold fluid in inventory, 'sulfur' or 'plastic' naturally fail the hand-craft check.
@@ -97,7 +97,7 @@ MINING_DRILLS = {"burner-mining-drill", "electric-mining-drill"}
 OIL_EXTRACTORS = {"pumpjack"}
 
 
-#           HELPER FUNCTIONS
+# HELPER FUNCTIONS
 
 def world_to_grid(x: float, y: float, bounds: Tuple[int, int, int, int], grid_steps: int = 17) -> Tuple[int, int]:
     """
@@ -158,8 +158,6 @@ def is_player_near_ore_patch_center(px, py, patches, distance_threshold=7.0):
 
 
 # CORE MASKING LOGIC
-
-
 def get_action_masks(
         entities: List[Dict],
         player_info: Dict,

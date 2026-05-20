@@ -3,8 +3,7 @@ from typing import Any
 
 import rcon_bridge.rcon_bridge
 
-#              HELPER FUNCTIONS
-
+# HELPER FUNCTIONS
 def get_search_coords(x, y, rotation, distance=1):
     """Return the coordinates at a certain distance in the direction of rotation."""
     if rotation == 0:
@@ -26,8 +25,7 @@ def is_point_in_selection_box(px, py, selection_box):
             left_top['y'] <= py <= right_bottom['y'])
 
 
-#           LOGIC FINDER FUNCTIONS
-
+# LOGIC FINDER FUNCTIONS
 def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotation=False, check_selection_box=False,
                is_underground_belt=False, is_inserter=False, is_pipe_to_ground=False, is_burner_miner=False):
     """Generic edge detection for Belts, Inserters, and simple connections."""
@@ -315,7 +313,6 @@ def find_power_edges(machine_list):
 
 # FLUID HELPERS (Specific Machines)
 # Keeping these separate to preserve the specific offset logic provided in the prompt
-
 def _find_machine_fluid_edges(machine_list, target_name, config_map):
     """Generic helper for specific fluid machines to reduce duplication."""
     edges = []
@@ -503,10 +500,7 @@ def find_ground_pipe_pipe_edges(machine_list):
     return _find_machine_fluid_edges(machine_list, 'pipe-to-ground', config)
 
 
-#
 # MAIN FUNCTION
-#
-
 def translateEntitesToEdges(reciever) -> list[Any] | None:
     # 1. Fetch Data
     machines = reciever.scan_entities_boundingboxes()
