@@ -76,7 +76,7 @@ class FactorioEnv:
             raw_ores = self.receiver.scan_ore()
 
             time.sleep(2.0)
-            # 2. Process into Patches (Mid-points)
+            # 2. Process into Patches (Midpoints)
             # This significantly reduces graph size (1000s of ore nodes -> ~10 patch nodes)
             if raw_ores:
                 detector = OrePatchDetector(raw_ores)
@@ -138,13 +138,13 @@ class FactorioEnv:
         H_grid = create_grid_hypergraph(grid_entities, grid_size=10)
 
         # Functional (Edges)
-        # Note: Edges usually only exist between machines, not ore patches,
+        # Note: Edges usually only exist between machines, not ore patches
         functional_edges = Edging.translateEntitesToEdges(self.receiver)
         self._current_edge_count = len(functional_edges)
 
-        # User Instruction: No "zero row concatenation".
-        # We pass 'total_nodes' (which includes the player) directly to the creator.
-        # This ensures the matrix is initialized to the correct full size (Machines + Player).
+        # No zero row concatenation (dont ask lol)
+        # We pass 'total_nodes' (which includes the player) directly to the creator
+        # This ensures the matrix is initialized to the correct full size (Machines + Player)
         H_func = create_functional_hypergraph(features, functional_edges, total_nodes=total_nodes)
 
         # Combine
@@ -168,7 +168,6 @@ class FactorioEnv:
         final_x = unnormalize_coord(x_norm, min_x, max_x)
         final_y = unnormalize_coord(y_norm, min_y, max_y)
 
-        # --- MODIFIED: Smart Move Handling ---
         should_send_rcon = True
         log_msg = ""
 
@@ -216,7 +215,7 @@ class FactorioEnv:
             next_obs = self._last_obs
 
         # 3. Update Movement State (ALWAYS runs)
-        # This tracks the movement initiated in previous steps, regardless of what we did this step.
+        # This tracks the movement initiated in previous steps, regardless of what we did this step
         if self.move_state['active']:
             self.move_state['timer'] += 1
 
@@ -230,6 +229,7 @@ class FactorioEnv:
                 self.move_state['active'] = False
                 # Optionally stop the character in game if they timed out?
                 # self.receiver.send_command("/c game.player.walking_state = {walking=false}")
+                # TODO: Check if this is necessary
 
         reward, done = self._compute_reward(log_msg, action_idx)
 
@@ -269,10 +269,11 @@ class FactorioEnv:
                 self.successful_crafts += 1
             else:
                 # Optional: You can add a small negative here if you want to
-                # aggressively discourage hand-crafting late game, but 0 is usually safer.
+                # aggressively discourage hand-crafting late game, but 0 is usually safer
                 pass
 
-                # Production Score (Anti-Hacking)
+                # Production Score (prevent reward hacking by penalizing stagnant production)
+                # TODO: check dynamic rewards on google docs
         current_total_production = 0
         for e in self._last_raw_entities:
             current_total_production += int(e.get('products_finished', 0))
@@ -293,6 +294,8 @@ class FactorioEnv:
             self.max_edges_seen = self._current_edge_count
 
         # Milestones
+        # the agent gets a reward for achieving something for the first time
+        # likely to be removed
         inv = self._last_raw_player.get("inventory", [])
         for item in inv:
             name = item.get("name", "unknown")

@@ -84,8 +84,8 @@ RECIPES = {
 
     # RECIPES THAT CANNOT BE HAND CRAFTED BUT CAN BE SET IN MACHINES
     # These are needed for ACTION 6 (Change Recipe), but strictly should not be in ACTION 2 (Craft)
-    # The logic below handles this by checking if ingredients are in inventory.
-    # Since you can't hold fluid in inventory, 'sulfur' or 'plastic' naturally fail the hand-craft check.
+    # The logic below handles this by checking if ingredients are in inventory
+    # Since you can't hold fluid in inventory, 'sulfur' or 'plastic' naturally fail the hand-craft check
     "sulfur": {"water": 30, "petroleum-gas": 30},
     "plastic-bar": {"coal": 1, "petroleum-gas": 20},
     "empty-barrel": {"steel-plate": 1},
@@ -315,7 +315,7 @@ def get_action_masks(
 
             # 3. Check for valid Ore Patch (excluding crude-oil)
             # This relies on the internal structure of patches.json being compatible
-            # with OrePatchDetector and Shapely geometry objects being loaded correctly.
+            # with OrePatchDetector and Shapely geometry objects being loaded correctly
 
             is_mineable = False
             if loaded_patches:
@@ -481,7 +481,7 @@ def get_action_masks(
                 continue
 
             # 2. Map to ID
-            # Assuming the Network Output for "Item" aligns with ITEM_MAP.
+            # Assuming the Network Output for "Item" aligns with ITEM_MAP
             iid = ITEM_MAP.get(name, 0)
             if iid > 0:
                 item_mask[6, iid] = 1.0

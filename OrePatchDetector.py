@@ -32,7 +32,7 @@ class OrePatchDetector:
             # Check if entity is a tree (using 'type' from Lua or name fallback)
             is_tree = entity.get('type') == 'tree' or 'tree' in entity['name']
 
-            # If it's a tree, use a generic key. If it's ore, use the specific name.
+            # If its a tree, use a generic key. If its ore, use the specific name
             group_key = 'tree' if is_tree else entity['name']
 
             if group_key not in groups:
@@ -44,6 +44,8 @@ class OrePatchDetector:
             positions = np.array(positions)
 
             # SELECT EPSILON: Use tree_gap for trees, default self.eps for ores
+            # ensures that trees are allowed to have larger gaps since they are placed further apart
+            # ores are always adjacent to each other on our maps
             if group_key == 'tree':
                 current_eps = tree_gap
                 current_min_samples = 5  # Optional: Trees might need a different density threshold

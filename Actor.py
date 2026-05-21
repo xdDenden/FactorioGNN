@@ -213,6 +213,7 @@ class ActorWorker:
         self.spin_up_container()
         self.init_environment()
 
+
         # We return an empty list because train_dqn.py overwrites this
         # variable immediately with actor.env.current_patches anyway!
         return []

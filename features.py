@@ -98,7 +98,7 @@ def compute_bounds(entities: List[Entity], char_info: Optional[CharInfo] = None,
     center_x = int(pos.get("x", 0))
     center_y = int(pos.get("y", 0))
 
-    # REMOVED: The block that calculated the average of entities and caused the crash.
+    # REMOVED: The block that calculated the average of entities and caused the crash
 
     # 2. Calculate Bounds
     min_x = center_x - radius

@@ -180,16 +180,16 @@ class Rcon_reciever:
 
     def change_recipe(self, x: float, y: float, itemIndex: int) -> bool:
         if not self.distanceCheck(x, y):
-            if config.Config.VERBOSE:
+            if RunConfig.Config.VERBOSE:
                 print(f"Change Recipe failed at ({x}, {y}).")
             return False
         message = self._send_command_with_retry(f"/c_recipe {x} {y} {itemIndex} ")
         if "ERROR" in message or "FAILED" in message:
-            if config.Config.VERBOSE:
+            if RunConfig.Config.VERBOSE:
                 print(f"Change Recipe Error: {message}")
             return False
         else:
-            if config.Config.VERBOSE:
+            if RunConfig.Config.VERBOSE:
                 print(f"Recipe Change Success: {message}")
             return True
 
@@ -208,7 +208,7 @@ class Rcon_reciever:
                 print(f"Build Error from server: {message}")
             return False
         else:
-            if Runconfig.Config.VERBOSE:
+            if RunConfig.Config.VERBOSE:
                 print(f"Build Success: {message}")
             return True
 
@@ -269,13 +269,15 @@ if __name__ == "__main__":
     try:
         receiver.connect()
         #receiver.reset()
-        entities = receiver.scan_entities()
-        bbentities = receiver.scan_entities_boundingboxes()
+        #entities = receiver.scan_entities()
+        #bbentities = receiver.scan_entities_boundingboxes()
         #ores = receiver.scan_ore()
-        inventory = receiver.char_info()
-        print(entities)
-        print(bbentities)
+        #inventory = receiver.char_info()
+        char_info = receiver.char_info()
+        print(char_info)
+        #print(entities)
+        #print(bbentities)
         #print(ores)
-        print(inventory)
+        #print(inventory)
     finally:
         receiver.disconnect()

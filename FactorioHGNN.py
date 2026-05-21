@@ -190,7 +190,8 @@ def preprocess_features_for_gnn(feature_list: List[Dict[str, Any]],
 class HypergraphConv(nn.Module):
     """
     Hypergraph convolution layer.
-    Point 1: Updated with robust normalization D_v^-1 * H * D_e^-1 * H^T
+    Updated with robust normalization D_v^-1 * H * D_e^-1 * H^T
+
     """
 
     def __init__(self, in_features, out_features):

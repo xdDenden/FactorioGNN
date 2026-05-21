@@ -94,6 +94,7 @@ while True:
                     safe_qsize_for_math = raw_qsize if isinstance(raw_qsize, (int, float)) else 0
 
                     # Determine Bottleneck Status dynamically
+                    # these emojis are NOT AI we specifically used them cus its actually useful and looks good here
                     if utd > 8:
                         bottleneck = "🔴 Actor Limited (GPU Starving)"
                     elif safe_qsize_for_math > 100:
@@ -101,7 +102,7 @@ while True:
                     else:
                         bottleneck = "🟢 Balanced Pipeline"
 
-                    b3.metric("Update-To-Data (UTD) Ratio", f"{utd}x",
+                    b3.metric("Update To Data (UTD) Ratio", f"{utd}x",
                               help="Represents how many times the GPU trains on the same Data", delta=bottleneck,
                               delta_color="off")
 

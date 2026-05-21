@@ -33,8 +33,8 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
 
     # 1. INSERTER LOGIC (Optimized)
     if is_inserter:
-        # PRE-FILTER: Create a list of only things an inserter can actually touch.
-        # This removes trees, walls, poles, and landmines from the inner loop calculations.
+        # PRE FILTER: Create a list of only things an inserter can actually touch
+        # This removes trees, walls, poles, and landmines from the inner loop calculations
         interactable_targets = []
         for m in machine_list:
             name = m['machine_name']
@@ -79,8 +79,8 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
                 if other == machine: continue
 
                 # Optimization: Bounding box pre-check (AABB)
-                # If the target is too far away in X or Y, don't run the detailed selection box math.
-                # Max reach + machine size ~ 3 tiles.
+                # If the target is too far away in X or Y, don't run the detailed selection box math
+                # Max reach + machine size ~ 3 tiles
                 if abs(other['x'] - x) > 3 or abs(other['y'] - y) > 3:
                     continue
 
@@ -151,9 +151,9 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
                         break
         return edges
 
-    # 4. BURNER MINER LOGIC (Optimized)
+    # 4. BURNER MINER LOGIC
     if is_burner_miner:
-        # PRE-FILTER: Only look at valid output targets (Furnaces, Belts)
+        # PRE FILTER: Only look at valid output targets (Furnaces, Belts)
         valid_targets = [m for m in machine_list if m['machine_name'] in check_to]
 
         for machine in machine_list:
@@ -176,7 +176,7 @@ def find_edges(machine_list, check_from, check_to, max_distance=1, strict_rotati
                     break
         return edges
 
-    # 5. STANDARD LOGIC (Coordinate Lookup - Already Optimal)
+    # 5. standard coordinate lookup
     coord_lookup = {(m['x'], m['y']): m for m in machine_list}
 
     for machine in machine_list:

@@ -362,7 +362,7 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
 def learner_loop(shared_policy, exp_queue, device, cfg):
     print(f"[Learner] Starting up on {device}...")
 
-    # --- GPU Models ---
+    # GPU Models
     policy_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
     policy_net.load_state_dict(shared_policy.state_dict())  # Init from CPU
 
@@ -372,6 +372,7 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
 
     optimizer = optim.Adam(policy_net.parameters(), lr=cfg.LR)
     criterion = nn.MSELoss()
+    # taken right from Deep Learning lol
     memory = ReplayBuffer(cfg.BUFFER_SIZE)
 
     updates_done = 0
@@ -419,7 +420,7 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
             max_next_nodes = max(n_state[0].shape[0] for n_state in batch_next_state)
             max_next_edges = max(n_state[1].shape[1] for n_state in batch_next_state)
 
-            # 2. Dynamically Infer Feature Dimension
+            # 2. Dynamically infer feature dimension
             feature_dim = batch_state[0][0].shape[1]
 
             batched_s_nodes = torch.zeros((cfg.BATCH_SIZE, max_nodes, feature_dim), device=device)
@@ -454,6 +455,8 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
                 nq_act, nq_item, nq_rot, nq_map, _ = target_net(batched_ns_nodes, batched_ns_H, dummy_h, mask=next_node_masks)
 
                 # Vectorized Max Q-value extraction
+                # sounds horrible because it is and we implemented this according
+                # to the guide on SciKit
                 max_nq_act = nq_act.max(dim=1)[0]
                 max_nq_item = nq_item.max(dim=1)[0]
                 max_nq_rot = nq_rot.max(dim=1)[0]
@@ -467,6 +470,7 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
                 target_vals = r_tensor + cfg.GAMMA * max_q * (1 - d_tensor)
 
             # 6. VECTORIZED LOSS CALCULATION
+            # same here
             actions_t = torch.tensor(batch_action, dtype=torch.long, device=device)
             act_idx = actions_t[:, 0]
             item_idx = actions_t[:, 1]
@@ -510,7 +514,6 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
                     updates_in_interval = updates_done - last_updates_count
                     updates_per_sec = updates_in_interval / elapsed_interval
 
-                    # You will need to add `last_steps_ingested = 0` up where you define last_updates_count!
                     steps_in_interval = total_steps_ingested - last_steps_ingested
                     ingestion_rate = steps_in_interval / elapsed_interval
 
@@ -577,7 +580,6 @@ if __name__ == '__main__':
 
     experience_queue = mp.Queue(maxsize=5000)
 
-    NUM_ACTORS = 20
     actor_processes = []
 
     # Start ALL actor processes based on Config
@@ -589,11 +591,13 @@ if __name__ == '__main__':
     # 2. THEN start the learner loop on the main thread
     try:
         learner_loop(shared_policy_net, experience_queue, gpu_device, cfg)
+
+
     except KeyboardInterrupt:
         print("\n[Master] Ctrl+C detected. Asking Actors to pack up and delete their containers...")
 
-        # We DO NOT use p.terminate() here anymore.
-        # We wait for the Actors to run their `finally` blocks and close themselves.
+        # We DO NOT use p.terminate() here anymore
+        # We wait for the Actors to run their `finally` blocks and close themselves
         for p in actor_processes:
             p.join(timeout=10)  # Give them up to 10 seconds to delete the containers
 

@@ -159,7 +159,7 @@ def play():
     print("Press Ctrl+C to stop.")
 
     while True:
-        # --- PREPARATION PHASE (Docker & Maps) ---
+        # PREPARATION PHASE (Docker & Maps)
         try:
             # Pick Map
             TARGET_SAVE = map_scheduler.get_next_map()
@@ -173,7 +173,7 @@ def play():
             container.stop()
             time.sleep(2)
 
-            # Clean saves (Cross-platform way)
+            # Clean saves (Crossplatform way)
             # Iterate over the SAVE_FOLDER using pathlib
             for item in SAVE_FOLDER.iterdir():
                 if item.is_file():
