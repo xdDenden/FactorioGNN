@@ -71,33 +71,30 @@ def create_grid_hypergraph(entities: List[Any], grid_size: int = 4) -> torch.Ten
 
     return H
 
-def create_functional_hypergraph(feature_list: List[Dict[str, Any]],
+def create_functional_hypergraph(raw_entities: List[Dict[str, Any]],
                                  edges: List[Dict[str, Any]],
                                  total_nodes: int) -> torch.Tensor:
     """
-    Creates an incidence matrix H based on functional connections.
-    Updated to accept total_nodes to avoid post-hoc padding.
+    Creates an incidence matrix H based on functional connections using raw world coordinates.
     """
     num_edges = len(edges)
-
-    # Initialize Incidence Matrix with the CORRECT full size immediately
-    # Shape: (Total Nodes including Player, Edges)
     H = torch.zeros((total_nodes, max(1, num_edges)))
 
     if num_edges == 0:
         return H
 
-    # 1. Build Coordinate Mapping: (x, y) -> Node Index
+    # 1. Build Coordinate Mapping from raw entities: (round(x, 1), round(y, 1)) -> Node Index
+    # Note: raw_entities are indices 0 .. len(raw_entities)-1 in node_features
     coord_to_idx = {}
-    for i, feat in enumerate(feature_list):
-        x = feat.get('x') if isinstance(feat, dict) else feat.x
-        y = feat.get('y') if isinstance(feat, dict) else feat.y
-        coord_to_idx[(x, y)] = i
+    for i, ent in enumerate(raw_entities):
+        x = ent.get('x') if isinstance(ent, dict) else getattr(ent, 'x', 0)
+        y = ent.get('y') if isinstance(ent, dict) else getattr(ent, 'y', 0)
+        coord_to_idx[(round(float(x), 1), round(float(y), 1))] = i
 
-    # 2. Populate Matrix
+    # 2. Populate Incidence Matrix
     for i, edge in enumerate(edges):
-        src_key = (edge['from_x'], edge['from_y'])
-        dst_key = (edge['to_x'], edge['to_y'])
+        src_key = (round(float(edge['from_x']), 1), round(float(edge['from_y']), 1))
+        dst_key = (round(float(edge['to_x']), 1), round(float(edge['to_y']), 1))
 
         u = coord_to_idx.get(src_key)
         v = coord_to_idx.get(dst_key)

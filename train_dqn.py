@@ -163,7 +163,8 @@ def dump_dashboard_state(state_dict):
     except Exception:
         pass # Ignore write collisions
 
-def dump_actor_state(actor_id, current_map, epsilon, step, episode_reward, total_actor_steps, steps_per_sec, reward_breakdown=None):
+def dump_actor_state(actor_id, current_map, epsilon, step, episode_reward, total_actor_steps, steps_per_sec,
+                     reward_breakdown=None, episode=1, episodes_completed=0):
     """Safely write individual actor state for Streamlit tabs."""
     actor_file = f"actor_{actor_id}_state.json"
     state_dict = {
@@ -171,6 +172,8 @@ def dump_actor_state(actor_id, current_map, epsilon, step, episode_reward, total
         "current_map": current_map,
         "epsilon": epsilon,
         "step": step,
+        "episode": episode,  # 1-based number of the episode currently being played
+        "episodes_completed": episodes_completed,
         "episode_reward": episode_reward,
         "total_actor_steps": total_actor_steps,
         "steps_per_sec": round(steps_per_sec, 2),
@@ -255,6 +258,9 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
     last_log_time = time.time()
     last_log_steps = 0
 
+    # Episode tracking for the dashboard
+    episodes_completed = 0
+
     try:
         while True:
             try:
@@ -291,15 +297,18 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                     raw_player = actor.env._last_raw_player
                     inv_list = raw_player.get('inventory', [])
                     inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
-                    valid_items = get_available_items(actor.env.receiver.scan_research())
-
+                    if t == 0 or t % 50 == 0:
+                        valid_items = get_available_items(actor.env.receiver.scan_research())
                     masks = get_action_masks(
                         entities=raw_entities, player_info=raw_player, inventory=inventory,
                         available_items=valid_items, bounds=actor.env.current_bounds,
                         patches=patches, move_state=actor.env.move_state
                     )
 
-                    epsilon = max(cfg.EPSILON_END, cfg.EPSILON_START - (cfg.EPSILON_START - cfg.EPSILON_END) * (actor_steps / cfg.EPSILON_DECAY))
+                    epsilon = max(
+                        cfg.EPSILON_END,
+                        cfg.EPSILON_START - (cfg.EPSILON_START - cfg.EPSILON_END) * (actor_steps / cfg.EPSILON_DECAY)
+                    )
 
                     # Infer from LOCAL policy
                     act, item, rot, map_idx, next_hidden = select_action(
@@ -307,7 +316,8 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                     )
 
                     y_grid, x_grid = map_idx // 17, map_idx % 17
-                    x_norm, y_norm = -1.0 + (x_grid / 16.0) * 2.0, -1.0 + (y_grid / 16.0) * 2.0
+                    x_norm = -1.0 + (x_grid / 16.0) * 2.0
+                    y_norm = -1.0 + (y_grid / 16.0) * 2.0
 
                     next_obs, reward, done, info = actor.env.step(act, item, rot, x_norm, y_norm)
                     episode_reward += reward
@@ -339,7 +349,9 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                         steps_per_sec = steps_diff / elapsed if elapsed > 0 else 0.0
 
                         dump_actor_state(actor_id, target_save, epsilon, t, episode_reward, actor_steps, steps_per_sec,
-                                         reward_breakdown=info.get("reward_breakdown", {}))
+                                         reward_breakdown=info.get("reward_breakdown", {}),
+                                         episode=episodes_completed + 1,
+                                         episodes_completed=episodes_completed)
 
                         last_log_time = current_time
                         last_log_steps = actor_steps
@@ -351,8 +363,21 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                 if len(local_buffer) > 0:
                     exp_queue.put(local_buffer)
 
+                # Episode finished: count it and tell the dashboard (step reset to 0 for the next map boot)
+                episodes_completed += 1
+                dump_actor_state(actor_id, target_save, epsilon, 0, 0.0, actor_steps, 0.0,
+                                 reward_breakdown={},
+                                 episode=episodes_completed + 1,
+                                 episodes_completed=episodes_completed)
+
             except Exception as e:
-                print(f"[Actor {actor_id}] Crashed: {e}. Restarting environment...")
+                print(f"\n[Actor {actor_id}] CRASHED: {e}")
+                if actor.container is not None:
+                    try:
+                        print(actor.container.logs(tail=20).decode('utf-8'))
+                    except Exception:
+                        pass
+                print(f"[Actor {actor_id}] Restarting environment...\n")
                 time.sleep(5)
     except KeyboardInterrupt:
         print(f"[Actor {actor_id}] Received shutdown signal.")
@@ -373,8 +398,9 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
     target_net.eval()
 
     optimizer = optim.Adam(policy_net.parameters(), lr=cfg.LR)
-    criterion = nn.MSELoss()
-    # taken right from Deep Learning lol
+    #criterion = nn.MSELoss()
+    criterion = nn.SmoothL1Loss()
+    # we believe that smoothL1loss is a better fit since it handles our milestone rewards better
     memory = ReplayBuffer(cfg.BUFFER_SIZE)
 
     updates_done = 0
@@ -454,25 +480,31 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
             q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(batched_s_nodes, batched_s_H, dummy_h, mask=node_masks)
 
             with torch.no_grad():
-                nq_act, nq_item, nq_rot, nq_map, _ = target_net(batched_ns_nodes, batched_ns_H, dummy_h, mask=next_node_masks)
+                nq_act, nq_item, nq_rot, nq_map, _ = target_net(batched_ns_nodes, batched_ns_H, dummy_h,
+                                                                mask=next_node_masks)
 
-                # Vectorized Max Q-value extraction
-                # sounds horrible because it is and we implemented this according
-                # to the guide on SciKit
+                # Determine which action the target network would greedily pick next
+                next_act_idx = nq_act.argmax(dim=1)
+                next_uses_item = ((next_act_idx == 2) | (next_act_idx == 3) | (next_act_idx == 4) | (
+                            next_act_idx == 6)).float()
+                next_uses_rot = (next_act_idx == 3).float()
+                next_uses_map = (next_act_idx != 2).float()
+
                 max_nq_act = nq_act.max(dim=1)[0]
-                max_nq_item = nq_item.max(dim=1)[0]
-                max_nq_rot = nq_rot.max(dim=1)[0]
-                max_nq_map = nq_map.view(cfg.BATCH_SIZE, -1).max(dim=1)[0]
+                max_nq_item = nq_item.max(dim=1)[0] * next_uses_item
+                max_nq_rot = nq_rot.max(dim=1)[0] * next_uses_rot
+                max_nq_map = nq_map.view(cfg.BATCH_SIZE, -1).max(dim=1)[0] * next_uses_map
 
-                max_q = (max_nq_act + max_nq_item + max_nq_rot + max_nq_map) / 4.0
+                # Divide only by the number of active heads for that next action
+                active_heads = 1.0 + next_uses_item + next_uses_rot + next_uses_map
+                max_q = (max_nq_act + max_nq_item + max_nq_rot + max_nq_map) / active_heads
 
                 r_tensor = torch.tensor(batch_reward, dtype=torch.float32, device=device)
                 d_tensor = torch.tensor(batch_done, dtype=torch.float32, device=device)
 
-                target_vals = r_tensor + cfg.GAMMA * max_q * (1 - d_tensor)
+                target_vals = r_tensor + cfg.GAMMA * max_q * (1.0 - d_tensor)
 
-            # 6. VECTORIZED LOSS CALCULATION
-            # same here
+            # 6. VECTORIZED MASKED LOSS CALCULATION
             actions_t = torch.tensor(batch_action, dtype=torch.long, device=device)
             act_idx = actions_t[:, 0]
             item_idx = actions_t[:, 1]
@@ -486,10 +518,17 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
             chosen_q_rot = q_rot_v[batch_arange, rot_idx]
             chosen_q_map = q_map_v.view(cfg.BATCH_SIZE, -1)[batch_arange, map_idx]
 
-            loss = (criterion(chosen_q_act, target_vals) +
-                    criterion(chosen_q_item, target_vals) +
-                    criterion(chosen_q_rot, target_vals) +
-                    criterion(chosen_q_map, target_vals))
+            # Mask out heads that had no effect on the executed action
+            uses_item = ((act_idx == 2) | (act_idx == 3) | (act_idx == 4) | (act_idx == 6)).float()
+            uses_rot = (act_idx == 3).float()
+            uses_map = (act_idx != 2).float()
+
+            loss_act = nn.functional.smooth_l1_loss(chosen_q_act, target_vals)
+            loss_item = (nn.functional.smooth_l1_loss(chosen_q_item, target_vals, reduction='none') * uses_item).mean()
+            loss_rot = (nn.functional.smooth_l1_loss(chosen_q_rot, target_vals, reduction='none') * uses_rot).mean()
+            loss_map = (nn.functional.smooth_l1_loss(chosen_q_map, target_vals, reduction='none') * uses_map).mean()
+
+            loss = loss_act + loss_item + loss_rot + loss_map
 
             # 7. BACKPROPAGATION
             optimizer.zero_grad()

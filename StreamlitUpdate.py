@@ -18,6 +18,14 @@ def format_time(seconds):
     return str(datetime.timedelta(seconds=int(seconds)))
 
 
+def load_json(path):
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 placeholder = st.empty()
 
 while True:
@@ -39,6 +47,24 @@ while True:
             actor_files = glob.glob("actor_*_state.json")
             num_actors = len(actor_files)
 
+        # Shared values used by both the overview and the per-actor tabs
+        hparams = state.get("hyperparameters", {}) if state else {}
+        max_timesteps = hparams.get("MAX_TIMESTEPS", 1000)
+        episodes_per_actor = hparams.get("NUM_EPISODES", 50)
+
+        # Overall episode progress across all actors (partial credit for the episode in flight)
+        total_episodes = episodes_per_actor * num_actors
+        episodes_done = 0
+        progress_units = 0.0
+        for i in range(num_actors):
+            a = load_json(f"actor_{i}_state.json") or {}
+            completed = min(a.get("episodes_completed", 0), episodes_per_actor)
+            episodes_done += completed
+            progress_units += completed
+            if completed < episodes_per_actor:
+                progress_units += max(0.0, min(a.get("step", 0) / max_timesteps, 1.0))
+        overall_fraction = progress_units / total_episodes if total_episodes > 0 else 0.0
+
         if state or num_actors > 0:
             # 2. Create Dynamic Tabs
             tab_names = ["Overall Progress"] + [f"actor {i}" for i in range(num_actors)]
@@ -48,6 +74,31 @@ while True:
             # TAB 0: OVERALL PROGRESS (Learner)
 
             with tabs[0]:
+                # TOTAL COMPLETION BAR + ETA
+                if total_episodes > 0:
+                    st.header("Total Completion")
+                    elapsed_total = state.get("elapsed_total", 0) if state else 0
+
+                    st.progress(min(overall_fraction, 1.0),
+                                text=f"{episodes_done} / {total_episodes} episodes completed "
+                                     f"({overall_fraction * 100:.1f}%) across {num_actors} actors")
+
+                    e1, e2, e3 = st.columns(3)
+                    if overall_fraction >= 1.0:
+                        e1.metric("ETA", "Complete")
+                    elif overall_fraction > 0.01 and elapsed_total > 0:
+                        # Linear extrapolation of the average pace so far
+                        remaining = elapsed_total * (1 - overall_fraction) / overall_fraction
+                        finish_at = datetime.datetime.now() + datetime.timedelta(seconds=remaining)
+                        e1.metric("ETA (Time Remaining)", format_time(remaining))
+                        e2.metric("Estimated Finish", finish_at.strftime("%a %H:%M"))
+                    else:
+                        e1.metric("ETA (Time Remaining)", "Calculating...",
+                                  help="Needs ~1% of total progress before an estimate is meaningful.")
+                    e3.metric("Episodes Per Actor", f"{episodes_per_actor}")
+
+                    st.divider()
+
                 if state:
                     st.header("Learner Status")
 
@@ -167,7 +218,11 @@ while True:
                             ac4.metric("Iterations / Sec", actor_state.get("steps_per_sec", 0.0))
 
                             current_step = actor_state.get("step", 0)
-                            st.metric("Current Episode Reward", round(actor_state.get("episode_reward", 0.0), 3))
+                            ep1, ep2 = st.columns(2)
+                            ep1.metric("Episode",
+                                       f"{min(actor_state.get('episode', 1), episodes_per_actor)} / {episodes_per_actor}",
+                                       help="Episode this actor is currently playing.")
+                            ep2.metric("Current Episode Reward", round(actor_state.get("episode_reward", 0.0), 3))
 
                             # Safe progress bar
                             progress_val = max(0.0, min(current_step / max_timesteps, 1.0))

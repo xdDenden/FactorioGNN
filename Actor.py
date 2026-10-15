@@ -54,11 +54,19 @@ class ActorWorker:
             # Aggressive Cleanup
             try:
                 old_container = client.containers.get(self.container_name)
-                print(f"[actor {self.actor_id}] Found stuck container. Stopping it...")
-                old_container.stop()
-                old_container.remove(force=True)
-            except docker.errors.NotFound:
-                pass
+                print(
+                    f"\n[actor {self.actor_id}] Found stuck container (status: {old_container.status}). Last 25 Factorio log lines:")
+                try:
+                    print(old_container.logs(tail=25).decode('utf-8'))
+                except Exception as log_err:
+                    print(f"Could not read logs: {log_err}")
+                print(f"[actor {self.actor_id}] Stopping stuck container...\n")
+                try:
+                    old_container = client.containers.get(self.container_name)
+                    old_container.stop()
+                    old_container.remove(force=True)
+                except docker.errors.NotFound:
+                    pass
             except docker.errors.APIError as e:
                 # If Docker is already removing it automatically, just let it happen quietly
                 if e.response.status_code == 409 and "already in progress" in str(e):

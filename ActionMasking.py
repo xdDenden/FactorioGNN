@@ -319,12 +319,10 @@ def get_action_masks(
 
             is_mineable = False
             if loaded_patches:
-                # Check against patches
-                is_in_patch = False
                 p_list = detector.is_position_in_patch(wx, wy, patches=loaded_patches)
                 for p in p_list:
-                    if p['ore_type'] != 'crude-oil': # Cannot hand-mine oil
-                        is_in_patch = True
+                    if p['ore_type'] != 'crude-oil':  # Cannot hand-mine oil
+                        is_mineable = True
                         break
 
             if is_mineable:
@@ -394,7 +392,7 @@ def get_action_masks(
                         can_build_any = True
                 elif item_name in OIL_EXTRACTORS:
                     # Only enable pumpjack if player is near crude oil (within 4 tiles)
-                    if player_near_crude_oil:
+                    if player_near_oil:
                         item_mask[3, item_id] = 1.0
                         can_build_any = True
                 else:

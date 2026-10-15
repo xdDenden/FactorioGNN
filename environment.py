@@ -11,7 +11,7 @@ from FactorioHGNN import preprocess_features_for_gnn, create_functional_hypergra
 from GNNtoFactorio import translateGNNtoFactorio
 from ActionMasking import get_action_masks
 from OrePatchDetector import OrePatchDetector
-
+from mappings import ID_TO_ITEM
 
 class PatchNode:
     """Helper class to represent an ore patch center as a graph node."""
@@ -41,6 +41,7 @@ class FactorioEnv:
 
         # RL State Tracking
         self.milestones = set()
+        self.activated_machines = set()
         self.max_edges_seen = 0
         self.max_total_production_seen = 0
         self.successful_crafts = 0
@@ -62,12 +63,14 @@ class FactorioEnv:
             "invalid_action": {"sum": 0.0, "count": 0},
             "idle_penalty": {"sum": 0.0, "count": 0},
             "crafting_reward": {"sum": 0.0, "count": 0},
+            "machine_activation": {"sum": 0.0, "count": 0},
             "production_reward": {"sum": 0.0, "count": 0},
             "edge_reward": {"sum": 0.0, "count": 0},
             "milestone_reward": {"sum": 0.0, "count": 0}
         }
     def reset(self):
         self.milestones.clear()
+        self.activated_machines = set()
         self.max_edges_seen = 0
         self.max_total_production_seen = 0
         self.successful_crafts = 0
@@ -88,23 +91,45 @@ class FactorioEnv:
 
             time.sleep(2.0)
             # 2. Process into Patches (Midpoints)
-            # This significantly reduces graph size (1000s of ore nodes -> ~10 patch nodes)
             if raw_ores:
                 detector = OrePatchDetector(raw_ores)
                 patches = detector.process_patches()
 
                 for p in patches:
                     center = p['center']
-                    # Create a virtual node for the graph
                     self.patch_nodes.append(
                         PatchNode(p['ore_type'], center[0], center[1])
                     )
 
                 print(f"[actor {self.actor_id}] Processed {len(raw_ores)} ore entities into {len(self.patch_nodes)} patch centers.")
-                self.current_patches = patches  # Store patches so the Actor can grab them for masking
+                self.current_patches = patches
 
             obs = self.get_observation()
+
+            # Pre-populate baseline state so the agent only gets rewarded for NEW progress
+            self.max_edges_seen = self._current_edge_count
+            self.max_total_production_seen = 0
+            for e in self._last_raw_entities:
+                m_name = e.get('machine_name', '')
+                ex, ey = round(float(e.get('x', 0)), 1), round(float(e.get('y', 0)), 1)
+                if int(e.get('status', 0)) == 1:
+                    self.activated_machines.add((m_name, ex, ey))
+
+                finished = int(e.get('products_finished', 0))
+                recipe = e.get('recipe_name', '')
+                if recipe == "electronic-circuit":
+                    self.max_total_production_seen += finished * 10
+                elif recipe in ("copper-cable", "iron-gear-wheel"):
+                    self.max_total_production_seen += finished * 3
+                else:
+                    self.max_total_production_seen += finished * 1
+
+            inv = self._last_raw_player.get("inventory", [])
+            for item in inv:
+                if item.get("count", 0) > 0:
+                    self.milestones.add(item.get("name", "unknown"))
             self._last_obs = obs
+
             return obs
         except Exception as e:
             print(f"Connection failed: {e}")
@@ -151,13 +176,12 @@ class FactorioEnv:
         # Functional (Edges)
         # Note: Edges usually only exist between machines, not ore patches
         functional_edges = Edging.translateEntitesToEdges(self.receiver)
-        self._current_edge_count = len(functional_edges)
+        self._current_edge_count = self._count_meaningful_edges(functional_edges)
 
         # No zero row concatenation (dont ask lol)
         # We pass 'total_nodes' (which includes the player) directly to the creator
         # This ensures the matrix is initialized to the correct full size (Machines + Player)
-        H_func = create_functional_hypergraph(features, functional_edges, total_nodes=total_nodes)
-
+        H_func = create_functional_hypergraph(self._last_raw_entities, functional_edges, total_nodes=total_nodes)
         # Combine
         # Ensure grid and func graphs match in node dimension
         if H_grid.shape[0] != H_func.shape[0]:
@@ -171,6 +195,25 @@ class FactorioEnv:
         H = torch.cat([H_grid, H_func], dim=1)
 
         return node_features, H
+
+    def _count_meaningful_edges(self, edges):
+        """Only count edges that connect machines to logistics or power to consumers."""
+        meaningful = 0
+        for e in edges:
+            f_name, t_name = e.get('from_name', ''), e.get('to_name', '')
+            rel = e.get('relation_type', 'logistics')
+
+            # Skip pole-to-pole wire spam
+            if rel == 'power_wire':
+                continue
+            # Skip pure belt-to-belt or pipe-to-pipe lines (reward only when they connect to a machine/inserter/miner)
+            if 'belt' in f_name and 'belt' in t_name:
+                continue
+            if 'pipe' in f_name and 'pipe' in t_name:
+                continue
+
+            meaningful += 1
+        return meaningful
 
     def step(self, action_idx, item_idx, rotation_idx, x_norm, y_norm):
         if not self.current_bounds:
@@ -213,13 +256,14 @@ class FactorioEnv:
                 final_x, final_y, action_idx, item_idx, rotation_idx, self.receiver, verbose=self.cfg.VERBOSE
             )
 
-        OBSERVE_ACTIONS = {1, 3, 6}
-        if action_idx in OBSERVE_ACTIONS and "FAILED" not in log_msg:
-            # Full Scan
+        # Actions 1 (mine), 2 (craft), 3 (build), 4 (insert), 5 (take), 6 (recipe) ALL change entities or inventory!
+        FULL_OBSERVE_ACTIONS = {1, 3, 4, 5, 6}
+        CHAR_ONLY_ACTIONS = {0, 2}  # Move and Hand-Craft only change player pos/inventory
+
+        if action_idx in FULL_OBSERVE_ACTIONS and "FAILED" not in log_msg:
             next_obs = self.get_observation(scan_entities=True, char_info=True)
             self._last_obs = next_obs
-        elif action_idx == 0 and should_send_rcon:
-            #We only do char_info
+        elif action_idx in CHAR_ONLY_ACTIONS and should_send_rcon and "FAILED" not in log_msg:
             next_obs = self.get_observation(scan_entities=False, char_info=True)
             self._last_obs = next_obs
         else:
@@ -242,25 +286,25 @@ class FactorioEnv:
                 # self.receiver.send_command("/c game.player.walking_state = {walking=false}")
                 # TODO: Check if this is necessary
 
-        reward, done = self._compute_reward(log_msg, action_idx)
+        reward, done = self._compute_reward(log_msg, action_idx,item_idx)
 
         return next_obs, reward, done, {"reward_breakdown": self.reward_breakdown}
 
-    def _compute_reward(self, log_msg, action_idx):
+    def _compute_reward(self, log_msg, action_idx, item_idx=0):
         reward = 0.0
         done = False
+        action_failed = ("FAILED" in log_msg) or ("Cannot" in log_msg)
 
-        # Validation & Punishment
-        if "FAILED" in log_msg or "Cannot" in log_msg:
+        # 1. Validation & Punishment
+        if action_failed:
             r = -0.2
             reward += r
             self.reward_breakdown["invalid_action"]["sum"] += r
             self.reward_breakdown["invalid_action"]["count"] += 1
 
-        # Idle Punishment Logic
+        # 2. Idle Punishment Logic
         is_doing_something_useful = False
-
-        if action_idx != 0:
+        if action_idx != 0 and not action_failed:
             is_doing_something_useful = True
         elif action_idx == 0 and self.move_state['active']:
             is_doing_something_useful = True
@@ -275,85 +319,105 @@ class FactorioEnv:
                 self.reward_breakdown["idle_penalty"]["sum"] += r
                 self.reward_breakdown["idle_penalty"]["count"] += 1
 
-        # Crafting Reward (Modified with Hard Cap)
-        if action_idx == 2:  # craft action
-            # HARD CAP: 500 items.
-            # After 500, the reward drops to 0, forcing the actor to Automate.
-            if self.successful_crafts < 500:
-                alpha = 0.1  # decay rate
-                k = 5.0  # base reward
-                r = k / (1 + alpha * self.successful_crafts)
+        # 3. Goal-Directed Hand-Crafting Reward (Capped at 30 useful crafts)
+        USEFUL_EARLY_CRAFTS = {
+            "stone-furnace", "burner-mining-drill", "electric-mining-drill",
+            "burner-inserter", "inserter", "transport-belt", "small-electric-pole",
+            "assembling-machine-1", "iron-gear-wheel", "copper-cable", "electronic-circuit",
+            "boiler", "steam-engine", "offshore-pump"
+        }
+        if action_idx == 2 and not action_failed:
+            crafted_name = ID_TO_ITEM.get(item_idx, "none")
+            if crafted_name in USEFUL_EARLY_CRAFTS and self.successful_crafts < 30:
+                alpha = 0.2
+                k = 2.0
+                r = k / (1.0 + alpha * self.successful_crafts)
                 reward += r
-
                 self.reward_breakdown["crafting_reward"]["sum"] += r
                 self.reward_breakdown["crafting_reward"]["count"] += 1
                 self.successful_crafts += 1
-            else:
-                # Optional: You can add a small negative here if you want to
-                # aggressively discourage hand-crafting late game, but 0 is usually safer
-                pass
 
-                # Production Score (prevent reward hacking by penalizing stagnant production)
-                # TODO: check dynamic rewards on google docs
-        current_total_production = 0
+        # 4. Machine Activation & Tiered Automated Production
+        # Status 1 in Factorio = Working! Reward the agent the first time a machine at (x, y) starts working.
+        current_weighted_production = 0
         for e in self._last_raw_entities:
-            current_total_production += int(e.get('products_finished', 0))
+            m_name = e.get('machine_name', '')
+            ex, ey = round(float(e.get('x', 0)), 1), round(float(e.get('y', 0)), 1)
+            status = int(e.get('status', 0))
+            recipe = e.get('recipe_name', '')
 
-        if current_total_production > self.max_total_production_seen:
-            prod_delta = current_total_production - self.max_total_production_seen
-            r = (prod_delta * 1.0)
+            # Reward activating a machine (fueling a furnace/drill or powering an assembler with valid inputs)
+            if status == 1 and (m_name, ex, ey) not in self.activated_machines:
+                self.activated_machines.add((m_name, ex, ey))
+                r_act = 4.0 if "assembling" in m_name else 2.5
+                reward += r_act
+                self.reward_breakdown["machine_activation"]["sum"] += r_act
+                self.reward_breakdown["machine_activation"]["count"] += 1
+
+            # Weight finished products by early-game tier
+            finished = int(e.get('products_finished', 0))
+            if recipe == "electronic-circuit":
+                current_weighted_production += finished * 10
+            elif recipe in ("copper-cable", "iron-gear-wheel"):
+                current_weighted_production += finished * 3
+            else:
+                current_weighted_production += finished * 1
+
+        if current_weighted_production > self.max_total_production_seen:
+            prod_delta = current_weighted_production - self.max_total_production_seen
+            r = float(prod_delta) * 1.5
             reward += r
-
             self.reward_breakdown["production_reward"]["sum"] += r
             self.reward_breakdown["production_reward"]["count"] += prod_delta
-            self.max_total_production_seen = current_total_production
+            self.max_total_production_seen = current_weighted_production
 
-        # Connectivity / Edges
+        # 5. Functional Connectivity / Edges (Filtered by _count_meaningful_edges)
         alpha = 0.1
-        k = 10.0
+        k = 6.0
         if self._current_edge_count > self.max_edges_seen:
             diff = self._current_edge_count - self.max_edges_seen
             r_total = 0.0
-
             for i in range(diff):
                 n = self.max_edges_seen + i
-                r_total += k / (1 + alpha * n)
+                r_total += k / (1.0 + alpha * n)
 
             reward += r_total
             self.reward_breakdown["edge_reward"]["sum"] += r_total
             self.reward_breakdown["edge_reward"]["count"] += diff
             self.max_edges_seen = self._current_edge_count
 
-        # Milestones
-        # the agent gets a reward for achieving something for the first time
-        # likely to be removed
+        # 6. Early-Game Milestones (Focused on Ore -> Plate -> Cable/Gear -> Green Chip)
         inv = self._last_raw_player.get("inventory", [])
         for item in inv:
             name = item.get("name", "unknown")
             count = item.get("count", 0)
+            if count <= 0:
+                continue
 
             if name not in self.milestones:
-                r = 0.0
-                if "ore" in name:
+                if name in ("iron-ore", "copper-ore", "coal", "stone"):
                     r = 5.0
-                elif "plate" in name:
-                    r = 100.0
-                elif "circuit" in name:
-                    r = 500.0
+                elif name in ("iron-plate", "copper-plate"):
+                    r = 25.0
+                elif name in ("iron-gear-wheel", "copper-cable"):
+                    r = 40.0
+                elif name == "electronic-circuit":
+                    r = 150.0
                 else:
-                    r = 2.5
+                    r = 1.0
 
                 reward += r
                 self.reward_breakdown["milestone_reward"]["sum"] += r
                 self.reward_breakdown["milestone_reward"]["count"] += 1
                 self.milestones.add(name)
 
-            if name == "advanced-circuit" and count >= 1:
-                r = 1000.0
+            # Early-Game Victory Condition: 5 Green Chips in inventory
+            if name == "electronic-circuit" and count >= 5:
+                r = 300.0
                 reward += r
                 self.reward_breakdown["milestone_reward"]["sum"] += r
                 self.reward_breakdown["milestone_reward"]["count"] += 1
-                print("VICTORY: RED CIRCUIT PRODUCED!")
+                print(f"[Actor {self.actor_id}] VICTORY: 5 GREEN CIRCUITS PRODUCED!")
                 done = True
 
         return reward, done
