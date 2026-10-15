@@ -11,7 +11,7 @@ class Config:
     RCON_PASSWORD: str = "eenie7Uphohpaim"
 
     # RL / Training Settings
-    MAX_TIMESTEPS: int = 20000
+    MAX_TIMESTEPS: int = 100000
     Random_Seed: int = 67
     GAMMA: float = 0.99  # Discount factor for future rewards
     LR: float = 1e-4  # Learning rate for the optimizer
@@ -19,12 +19,12 @@ class Config:
     BUFFER_SIZE: int = 5000  # Maximum size of the replay buffer
     EPSILON_START: float = 1.0  # Initial value of epsilon for epsilon-greedy policy
     EPSILON_END: float = 0.05  # Minimum value of epsilon for epsilon-greedy policy
-    EPSILON_DECAY: int = 563698  # Decay rate for epsilon over time
+    EPSILON_DECAY: int = 255555  # Decay rate for epsilon over time
     TARGET_UPDATE: int = 200  # Frequency of target network updates (in gradient steps)
     NUM_EPISODES: int = 50  # Total number of episodes to train the model
 
     # Distributed / Multiprocessing Settings
-    NUM_ACTORS: int = 5
+    NUM_ACTORS: int = 10
     CHUNK_SIZE: int = 32
     SYNC_INTERVAL: int = 128
 

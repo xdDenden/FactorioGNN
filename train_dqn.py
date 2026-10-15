@@ -163,7 +163,7 @@ def dump_dashboard_state(state_dict):
     except Exception:
         pass # Ignore write collisions
 
-def dump_actor_state(actor_id, current_map, epsilon, step, episode_reward, total_actor_steps, steps_per_sec):
+def dump_actor_state(actor_id, current_map, epsilon, step, episode_reward, total_actor_steps, steps_per_sec, reward_breakdown=None):
     """Safely write individual actor state for Streamlit tabs."""
     actor_file = f"actor_{actor_id}_state.json"
     state_dict = {
@@ -173,7 +173,8 @@ def dump_actor_state(actor_id, current_map, epsilon, step, episode_reward, total
         "step": step,
         "episode_reward": episode_reward,
         "total_actor_steps": total_actor_steps,
-        "steps_per_sec": round(steps_per_sec, 2)
+        "steps_per_sec": round(steps_per_sec, 2),
+        "reward_breakdown": reward_breakdown or {}
     }
     try:
         with open(actor_file, 'w') as f:
@@ -308,7 +309,7 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                     y_grid, x_grid = map_idx // 17, map_idx % 17
                     x_norm, y_norm = -1.0 + (x_grid / 16.0) * 2.0, -1.0 + (y_grid / 16.0) * 2.0
 
-                    next_obs, reward, done, _ = actor.env.step(act, item, rot, x_norm, y_norm)
+                    next_obs, reward, done, info = actor.env.step(act, item, rot, x_norm, y_norm)
                     episode_reward += reward
 
                     if next_obs is not None:
@@ -337,7 +338,8 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                         steps_diff = actor_steps - last_log_steps
                         steps_per_sec = steps_diff / elapsed if elapsed > 0 else 0.0
 
-                        dump_actor_state(actor_id, target_save, epsilon, t, episode_reward, actor_steps, steps_per_sec)
+                        dump_actor_state(actor_id, target_save, epsilon, t, episode_reward, actor_steps, steps_per_sec,
+                                         reward_breakdown=info.get("reward_breakdown", {}))
 
                         last_log_time = current_time
                         last_log_steps = actor_steps

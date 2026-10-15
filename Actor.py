@@ -78,11 +78,11 @@ class ActorWorker:
         # by default it should remove all of them
         if cfg.VERBOSE == True:
             self.container = client.containers.run(
-                "factoriotools/factorio",
+                "factoriotools/factorio:2.0.72",
                 name=self.container_name,
                 ports={
                     '27015/tcp': self.rcon_port,
-                    '34197/udp': self.game_port  # <--- Add this line!
+                    '34197/udp': self.game_port
                 },
                 volumes={self.base_dir: {'bind': '/factorio', 'mode': 'rw'}},
                 detach=True,
@@ -90,11 +90,11 @@ class ActorWorker:
             )
         else:
             self.container = client.containers.run(
-                "factoriotools/factorio",
+                "factoriotools/factorio:2.0.72",
                 name=self.container_name,
                 ports={
                     '27015/tcp': self.rcon_port,
-                    '34197/udp': self.game_port  # <--- Add this line!
+                    '34197/udp': self.game_port
                 },
                 volumes={self.base_dir: {'bind': '/factorio', 'mode': 'rw'}},
                 detach=True,

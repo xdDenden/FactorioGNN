@@ -173,6 +173,27 @@ while True:
                             progress_val = max(0.0, min(current_step / max_timesteps, 1.0))
                             st.progress(progress_val, text=f"Episode Progress (Step {current_step} / {max_timesteps})")
 
+                            # --- REWARD BREAKDOWN ---
+                            reward_breakdown = actor_state.get("reward_breakdown")
+                            if reward_breakdown:
+                                st.divider()
+                                st.subheader("Reward Breakdown (Current Episode)")
+
+                                # Convert the nested dictionary into a pandas DataFrame for Streamlit
+                                breakdown_df = pd.DataFrame(reward_breakdown).T
+
+                                # Clean up index names (e.g., 'invalid_action' -> 'Invalid Action')
+                                breakdown_df.index = breakdown_df.index.str.replace("_", " ").str.title()
+                                breakdown_df.columns = ["Total Reward", "Trigger Count"]
+
+                                rb_col1, rb_col2 = st.columns(2)
+
+                                with rb_col1:
+                                    st.dataframe(breakdown_df, width='content')
+
+                                with rb_col2:
+                                    st.bar_chart(breakdown_df["Total Reward"])
+
                         except json.JSONDecodeError:
                             st.warning(f"Syncing data for actor {i}...")
                     else:

@@ -54,7 +54,18 @@ class FactorioEnv:
             'target': (0.0, 0.0),
             'timer': 0
         }
+        self.reward_breakdown = self._init_reward_breakdown()
 
+    def _init_reward_breakdown(self):
+        """Helper to create a fresh reward tracker."""
+        return {
+            "invalid_action": {"sum": 0.0, "count": 0},
+            "idle_penalty": {"sum": 0.0, "count": 0},
+            "crafting_reward": {"sum": 0.0, "count": 0},
+            "production_reward": {"sum": 0.0, "count": 0},
+            "edge_reward": {"sum": 0.0, "count": 0},
+            "milestone_reward": {"sum": 0.0, "count": 0}
+        }
     def reset(self):
         self.milestones.clear()
         self.max_edges_seen = 0
@@ -62,7 +73,7 @@ class FactorioEnv:
         self.successful_crafts = 0
         self.steps_without_action = 0
         self.patch_nodes = []
-
+        self.reward_breakdown = self._init_reward_breakdown()
         # Reset Movement State
         self.move_state = {'active': False, 'target': (0.0, 0.0), 'timer': 0}
 
@@ -233,7 +244,7 @@ class FactorioEnv:
 
         reward, done = self._compute_reward(log_msg, action_idx)
 
-        return next_obs, reward, done, {}
+        return next_obs, reward, done, {"reward_breakdown": self.reward_breakdown}
 
     def _compute_reward(self, log_msg, action_idx):
         reward = 0.0
@@ -241,7 +252,10 @@ class FactorioEnv:
 
         # Validation & Punishment
         if "FAILED" in log_msg or "Cannot" in log_msg:
-            reward -= 0.2
+            r = -0.2
+            reward += r
+            self.reward_breakdown["invalid_action"]["sum"] += r
+            self.reward_breakdown["invalid_action"]["count"] += 1
 
         # Idle Punishment Logic
         is_doing_something_useful = False
@@ -256,7 +270,10 @@ class FactorioEnv:
         else:
             self.steps_without_action += 1
             if self.steps_without_action > 5:
-                reward -= 0.5
+                r = -0.5
+                reward += r
+                self.reward_breakdown["idle_penalty"]["sum"] += r
+                self.reward_breakdown["idle_penalty"]["count"] += 1
 
         # Crafting Reward (Modified with Hard Cap)
         if action_idx == 2:  # craft action
@@ -265,7 +282,11 @@ class FactorioEnv:
             if self.successful_crafts < 500:
                 alpha = 0.1  # decay rate
                 k = 5.0  # base reward
-                reward += k / (1 + alpha * self.successful_crafts)
+                r = k / (1 + alpha * self.successful_crafts)
+                reward += r
+
+                self.reward_breakdown["crafting_reward"]["sum"] += r
+                self.reward_breakdown["crafting_reward"]["count"] += 1
                 self.successful_crafts += 1
             else:
                 # Optional: You can add a small negative here if you want to
@@ -280,17 +301,27 @@ class FactorioEnv:
 
         if current_total_production > self.max_total_production_seen:
             prod_delta = current_total_production - self.max_total_production_seen
-            reward += (prod_delta * 1.0)
+            r = (prod_delta * 1.0)
+            reward += r
+
+            self.reward_breakdown["production_reward"]["sum"] += r
+            self.reward_breakdown["production_reward"]["count"] += prod_delta
             self.max_total_production_seen = current_total_production
 
         # Connectivity / Edges
         alpha = 0.1
-        k = 5.0
+        k = 10.0
         if self._current_edge_count > self.max_edges_seen:
             diff = self._current_edge_count - self.max_edges_seen
+            r_total = 0.0
+
             for i in range(diff):
                 n = self.max_edges_seen + i
-                reward += k / (1 + alpha * n)
+                r_total += k / (1 + alpha * n)
+
+            reward += r_total
+            self.reward_breakdown["edge_reward"]["sum"] += r_total
+            self.reward_breakdown["edge_reward"]["count"] += diff
             self.max_edges_seen = self._current_edge_count
 
         # Milestones
@@ -302,18 +333,26 @@ class FactorioEnv:
             count = item.get("count", 0)
 
             if name not in self.milestones:
+                r = 0.0
                 if "ore" in name:
-                    reward += 5.0
+                    r = 5.0
                 elif "plate" in name:
-                    reward += 10.0
+                    r = 100.0
                 elif "circuit" in name:
-                    reward += 50.0
+                    r = 500.0
                 else:
-                    reward += 2.0
+                    r = 2.5
+
+                reward += r
+                self.reward_breakdown["milestone_reward"]["sum"] += r
+                self.reward_breakdown["milestone_reward"]["count"] += 1
                 self.milestones.add(name)
 
             if name == "advanced-circuit" and count >= 1:
-                reward += 1000.0
+                r = 1000.0
+                reward += r
+                self.reward_breakdown["milestone_reward"]["sum"] += r
+                self.reward_breakdown["milestone_reward"]["count"] += 1
                 print("VICTORY: RED CIRCUIT PRODUCED!")
                 done = True
 
