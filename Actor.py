@@ -192,20 +192,20 @@ class ActorWorker:
 
     def stop(self):
         """Gracefully stops and explicitly removes the container."""
-        # Safely get the ID in case it was missing or renamed
-        a_id = getattr(self, 'agent_id', 'Unknown')
+        # Safely get the actor_id
+        a_id = getattr(self, 'actor_id', 'Unknown')
 
         # Safely check if the container attribute actually exists and holds a container
         if hasattr(self, 'container') and self.container is not None:
-            print(f"[Agent {a_id}] Halting and deleting container...")
+            print(f"[Actor {a_id}] Halting and deleting container...")
             try:
-                self.container.stop()
+                self.container.stop(timeout=3)
                 self.container.remove(force=True)
-                print(f"[Agent {a_id}] Container successfully deleted.")
+                print(f"[Actor {a_id}] Container successfully deleted.")
             except Exception as e:
-                print(f"[Agent {a_id}] Error during container deletion: {e}")
+                print(f"[Actor {a_id}] Error during container deletion: {e}")
         else:
-            print(f"[Agent {a_id}] No container found to delete. Shutting down.")
+            print(f"[Actor {a_id}] No container found to delete. Shutting down.")
     def prepare_map_and_ores(self, map_source_path):
         """Handles independent map loading and actor environment setup."""
         # 1. Clean and setup unique save directory

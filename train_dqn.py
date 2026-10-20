@@ -22,6 +22,8 @@ from rcon_bridge.rcon_bridge import Rcon_reciever
 from ActionMasking import get_action_masks
 import timeit
 import torch.multiprocessing as mp
+import glob
+
 
 # Initialize config globally so helper functions have access
 cfg = Config()
@@ -186,35 +188,86 @@ def dump_actor_state(actor_id, current_map, epsilon, step, episode_reward, total
         pass
 
 
-def save_checkpoint(path, policy_net, target_net, optimizer, memory, total_steps_ingested, updates_done):
-    print(f"\nSaving autosave to {path}...")
-    torch.save({
+def _atomic_torch_save(obj, target_path):
+    """Writes to a .tmp file first and atomically renames so interrupted saves never corrupt existing files."""
+    tmp_path = f"{target_path}.tmp"
+    torch.save(obj, tmp_path)
+    os.replace(tmp_path, target_path)
+
+
+def _prune_old_files(pattern, max_keep):
+    """Keeps only the `max_keep` most recent files matching `pattern`."""
+    if max_keep <= 0:
+        return
+    files = sorted(glob.glob(pattern), key=os.path.getmtime)
+    while len(files) > max_keep:
+        oldest = files.pop(0)
+        try:
+            os.remove(oldest)
+        except OSError:
+            pass
+
+
+def save_checkpoint(base_path, policy_net, target_net, optimizer, memory, total_steps_ingested, updates_done, cfg):
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+    # 1. Rolling Full Checkpoint (autosave_<updates>_<timestamp>.pth)
+    stem, ext = os.path.splitext(base_path)
+    rolling_ckpt_path = f"{stem}_u{updates_done}_{timestamp}{ext}"
+    print(f"\n[Autosave] Saving rolling checkpoint to {rolling_ckpt_path}...")
+
+    ckpt_data = {
         'policy_net': policy_net.state_dict(),
         'target_net': target_net.state_dict(),
         'optimizer': optimizer.state_dict(),
         'memory': memory.buffer,
         'total_steps_ingested': total_steps_ingested,
         'updates_done': updates_done
-    }, path)
-    print("Autosave complete.")
+    }
+    _atomic_torch_save(ckpt_data, rolling_ckpt_path)
+    # Also update the latest pointer file atomically for quick access
+    _atomic_torch_save(ckpt_data, base_path)
+    _prune_old_files(f"{stem}_u*{ext}", getattr(cfg, 'NUM_AUTOSAVES', 5))
 
-def load_checkpoint(path, policy_net, target_net, optimizer, memory):
-    """Loads the training state from a file."""
-    if not os.path.exists(path):
+    # 2. Rolling Weights-Only File (jimbo_dqn_weights_<updates>_<timestamp>.pth)
+    weights_base = getattr(cfg, 'WEIGHTS_PATH', 'jimbo_dqn_weights.pth')
+    w_stem, w_ext = os.path.splitext(weights_base)
+    rolling_weights_path = f"{w_stem}_u{updates_done}_{timestamp}{w_ext}"
+    print(f"[Autosave] Saving rolling weights to {rolling_weights_path}...")
+
+    cpu_weights = {k: v.cpu() for k, v in policy_net.state_dict().items()}
+    _atomic_torch_save(cpu_weights, rolling_weights_path)
+    _atomic_torch_save(cpu_weights, weights_base)
+    _prune_old_files(f"{w_stem}_u*{w_ext}", getattr(cfg, 'NUM_WEIGHTAUTOSAVE', 5))
+
+    print("[Autosave] Rolling autosave & weights export complete.\n")
+
+
+def load_checkpoint(base_path, policy_net, target_net, optimizer, memory):
+    """Loads the newest valid rolling checkpoint, automatically falling back if the latest is corrupted."""
+    stem, ext = os.path.splitext(base_path)
+    candidates = sorted(glob.glob(f"{stem}_u*{ext}"), key=os.path.getmtime, reverse=True)
+    if os.path.exists(base_path):
+        candidates.append(base_path)
+
+    if not candidates:
         return 0, 0
 
-    print(f"Loading checkpoint from {path}...")
-    try:
-        checkpoint = torch.load(path, weights_only=False)
-        policy_net.load_state_dict(checkpoint['policy_net'])
-        target_net.load_state_dict(checkpoint['target_net'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        memory.buffer = checkpoint['memory']
-        return checkpoint.get('total_steps_ingested', 0), checkpoint.get('updates_done', 0)
-    except Exception as e:
-        print(f"Warning: Failed to load checkpoint (likely corrupted). Error: {e}")
-        print("Starting with fresh weights.")
-        return 0, 0
+    for path in candidates:
+        print(f"Attempting to load checkpoint from {path}...")
+        try:
+            checkpoint = torch.load(path, weights_only=False)
+            policy_net.load_state_dict(checkpoint['policy_net'])
+            target_net.load_state_dict(checkpoint['target_net'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            memory.buffer = checkpoint['memory']
+            print(f"Successfully loaded checkpoint: {path}")
+            return checkpoint.get('total_steps_ingested', 0), checkpoint.get('updates_done', 0)
+        except Exception as e:
+            print(f"Warning: Failed to load {path} (Error: {e}). Trying previous backup...")
+
+    print("All checkpoint candidates failed or were corrupted. Starting with fresh weights.")
+    return 0, 0
 
 
 class MapScheduler:
@@ -232,10 +285,11 @@ class MapScheduler:
 
         return self.queue.pop()
 
+STOP_TRAIN_FILE = ".stop_train"
 
-
-    #main training loop
-
+def should_stop():
+    """Checks if the Streamlit UI requested a graceful stop."""
+    return os.path.exists(STOP_TRAIN_FILE)
 
 # 1. THE ACTOR LOOP (Runs in multiple processes)
 def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
@@ -261,15 +315,24 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
     # Episode tracking for the dashboard
     episodes_completed = 0
 
+    max_episodes = (getattr(cfg, 'NUM_EPISODES') * getattr(cfg, 'NUM_ACTORS'))
+
     try:
-        while True:
+        while episodes_completed < max_episodes and not should_stop():
             try:
                 target_save = map_scheduler.get_next_map()
                 map_source_path = os.path.join(cfg.SAVES_POOL, target_save)
 
+                if should_stop():
+                    break
+
                 patches = actor.prepare_map_and_ores(map_source_path)
+                if should_stop():
+                    break
+
                 obs = actor.env.reset()
-                if obs is None: continue
+                if obs is None:
+                    continue
 
                 patches = actor.env.current_patches
                 hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
@@ -283,6 +346,10 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                 local_policy.load_state_dict(shared_policy.state_dict())
 
                 for t in range(cfg.MAX_TIMESTEPS):
+                    if should_stop():
+                        print(f"[Actor {actor_id}] Stop signal detected. Aborting episode cleanly...")
+                        break
+
                     if t > 0:
                         obs = actor.env._last_obs
 
@@ -359,6 +426,9 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                     if done:
                         break
 
+                if should_stop():
+                    break
+
                 # Empty remaining buffer at end of episode
                 if len(local_buffer) > 0:
                     exp_queue.put(local_buffer)
@@ -371,6 +441,8 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                                  episodes_completed=episodes_completed)
 
             except Exception as e:
+                if should_stop():
+                    break
                 print(f"\n[Actor {actor_id}] CRASHED: {e}")
                 if actor.container is not None:
                     try:
@@ -386,7 +458,7 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
 
 
 # 2. THE LEARNER LOOP (Runs on Main Thread)
-def learner_loop(shared_policy, exp_queue, device, cfg):
+def learner_loop(shared_policy, exp_queue, device, cfg, actor_processes):
     print(f"[Learner] Starting up on {device}...")
 
     # GPU Models
@@ -406,9 +478,11 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
     updates_done = 0
     total_steps_ingested = 0
 
-    if os.path.exists(cfg.AUTOSAVE_PATH):
-        total_steps_ingested, updates_done = load_checkpoint(cfg.AUTOSAVE_PATH, policy_net, target_net, optimizer, memory)
-    else:
+    # Always attempt to load from rolling checkpoints or base AUTOSAVE_PATH
+    total_steps_ingested, updates_done = load_checkpoint(
+        cfg.AUTOSAVE_PATH, policy_net, target_net, optimizer, memory
+    )
+    if updates_done == 0:
         policy_net.load_state_dict(shared_policy.state_dict())
         target_net.load_state_dict(policy_net.state_dict())
 
@@ -417,183 +491,202 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
     MIN_BUFFER_SIZE = cfg.BATCH_SIZE * 5
 
     last_json_update = time.time()
+    last_autosave_time = time.time()
+    autosave_interval = getattr(cfg, 'AUTOSAVE_INTERVAL_SEC', 1800.0)  # 30 minutes
     last_updates_count = updates_done
     start_time_total = time.time()
     last_steps_ingested = total_steps_ingested
 
     hyperparameters = {k: v for k, v in vars(cfg).items() if not k.startswith('_')}
 
-    while True:
-        # 1. Unroll the queue chunks into the Replay Buffer
-        chunks_unrolled = 0
-        max_chunks_per_step = 40
-        while not exp_queue.empty() and chunks_unrolled < max_chunks_per_step:
-            try:
-                chunk = exp_queue.get_nowait()
-                for transition in chunk:
-                    memory.push(*transition)
-                    total_steps_ingested += 1
-                chunks_unrolled += 1
-            except Exception:
-                break  # Queue empty or busy
+    try:
+        while not should_stop():
+            # 1. Unroll the queue chunks into the Replay Buffer
+            chunks_unrolled = 0
+            max_chunks_per_step = 40
+            while not exp_queue.empty() and chunks_unrolled < max_chunks_per_step:
+                try:
+                    chunk = exp_queue.get_nowait()
+                    for transition in chunk:
+                        memory.push(*transition)
+                        total_steps_ingested += 1
+                    chunks_unrolled += 1
+                except Exception:
+                    break  # Queue empty or busy
 
-        if len(memory) >= cfg.MIN_BUFFER_SIZE:
-            transitions = memory.sample(cfg.BATCH_SIZE)
-            batch_state, batch_action, batch_reward, batch_next_state, batch_done = zip(*transitions)
+            if exp_queue.empty() and not any(p.is_alive() for p in actor_processes):
+                print("\n[Learner] All actors have finished their episodes and queue is drained. Finishing training...")
+                break
 
-            # 1. Find Max Dimensions for Current Batch
-            max_nodes = max(state[0].shape[0] for state in batch_state)
-            max_edges = max(state[1].shape[1] for state in batch_state)
+            if len(memory) >= cfg.MIN_BUFFER_SIZE:
+                transitions = memory.sample(cfg.BATCH_SIZE)
+                batch_state, batch_action, batch_reward, batch_next_state, batch_done = zip(*transitions)
 
-            max_next_nodes = max(n_state[0].shape[0] for n_state in batch_next_state)
-            max_next_edges = max(n_state[1].shape[1] for n_state in batch_next_state)
+                # 1. Find Max Dimensions for Current Batch
+                max_nodes = max(state[0].shape[0] for state in batch_state)
+                max_edges = max(state[1].shape[1] for state in batch_state)
 
-            # 2. Dynamically infer feature dimension
-            feature_dim = batch_state[0][0].shape[1]
+                max_next_nodes = max(n_state[0].shape[0] for n_state in batch_next_state)
+                max_next_edges = max(n_state[1].shape[1] for n_state in batch_next_state)
 
-            batched_s_nodes = torch.zeros((cfg.BATCH_SIZE, max_nodes, feature_dim), device=device)
-            batched_s_H = torch.zeros((cfg.BATCH_SIZE, max_nodes, max_edges), device=device)
-            node_masks = torch.zeros((cfg.BATCH_SIZE, max_nodes), dtype=torch.bool, device=device)
+                # 2. Dynamically infer feature dimension
+                feature_dim = batch_state[0][0].shape[1]
 
-            batched_ns_nodes = torch.zeros((cfg.BATCH_SIZE, max_next_nodes, feature_dim), device=device)
-            batched_ns_H = torch.zeros((cfg.BATCH_SIZE, max_next_nodes, max_next_edges), device=device)
-            next_node_masks = torch.zeros((cfg.BATCH_SIZE, max_next_nodes), dtype=torch.bool, device=device)
+                batched_s_nodes = torch.zeros((cfg.BATCH_SIZE, max_nodes, feature_dim), device=device)
+                batched_s_H = torch.zeros((cfg.BATCH_SIZE, max_nodes, max_edges), device=device)
+                node_masks = torch.zeros((cfg.BATCH_SIZE, max_nodes), dtype=torch.bool, device=device)
 
-            for i in range(cfg.BATCH_SIZE):
-                s_nodes, s_H = batch_state[i]
-                n_nodes, n_edges = s_H.shape
-                batched_s_nodes[i, :n_nodes, :] = s_nodes.to(device)
-                batched_s_H[i, :n_nodes, :n_edges] = s_H.to(device)
-                node_masks[i, :n_nodes] = True
+                batched_ns_nodes = torch.zeros((cfg.BATCH_SIZE, max_next_nodes, feature_dim), device=device)
+                batched_ns_H = torch.zeros((cfg.BATCH_SIZE, max_next_nodes, max_next_edges), device=device)
+                next_node_masks = torch.zeros((cfg.BATCH_SIZE, max_next_nodes), dtype=torch.bool, device=device)
 
-                # Next State
-                ns_nodes, ns_H = batch_next_state[i]
-                nn_nodes, nn_edges = ns_H.shape
-                batched_ns_nodes[i, :nn_nodes, :] = ns_nodes.to(device)
-                batched_ns_H[i, :nn_nodes, :nn_edges] = ns_H.to(device)
-                next_node_masks[i, :nn_nodes] = True
+                for i in range(cfg.BATCH_SIZE):
+                    s_nodes, s_H = batch_state[i]
+                    n_nodes, n_edges = s_H.shape
+                    batched_s_nodes[i, :n_nodes, :] = s_nodes.to(device)
+                    batched_s_H[i, :n_nodes, :n_edges] = s_H.to(device)
+                    node_masks[i, :n_nodes] = True
 
-            dummy_h = (torch.zeros(cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device),
-                       torch.zeros(cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device))
+                    # Next State
+                    ns_nodes, ns_H = batch_next_state[i]
+                    nn_nodes, nn_edges = ns_H.shape
+                    batched_ns_nodes[i, :nn_nodes, :] = ns_nodes.to(device)
+                    batched_ns_H[i, :nn_nodes, :nn_edges] = ns_H.to(device)
+                    next_node_masks[i, :nn_nodes] = True
 
-            # 5. ONE MASSIVE FORWARD PASS
-            q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(batched_s_nodes, batched_s_H, dummy_h, mask=node_masks)
+                dummy_h = (torch.zeros(cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device),
+                           torch.zeros(cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device))
 
-            with torch.no_grad():
-                nq_act, nq_item, nq_rot, nq_map, _ = target_net(batched_ns_nodes, batched_ns_H, dummy_h,
-                                                                mask=next_node_masks)
+                # 5. ONE MASSIVE FORWARD PASS
+                q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(batched_s_nodes, batched_s_H, dummy_h, mask=node_masks)
 
-                # Determine which action the target network would greedily pick next
-                next_act_idx = nq_act.argmax(dim=1)
-                next_uses_item = ((next_act_idx == 2) | (next_act_idx == 3) | (next_act_idx == 4) | (
-                            next_act_idx == 6)).float()
-                next_uses_rot = (next_act_idx == 3).float()
-                next_uses_map = (next_act_idx != 2).float()
+                with torch.no_grad():
+                    nq_act, nq_item, nq_rot, nq_map, _ = target_net(batched_ns_nodes, batched_ns_H, dummy_h,
+                                                                    mask=next_node_masks)
 
-                max_nq_act = nq_act.max(dim=1)[0]
-                max_nq_item = nq_item.max(dim=1)[0] * next_uses_item
-                max_nq_rot = nq_rot.max(dim=1)[0] * next_uses_rot
-                max_nq_map = nq_map.view(cfg.BATCH_SIZE, -1).max(dim=1)[0] * next_uses_map
+                    # Determine which action the target network would greedily pick next
+                    next_act_idx = nq_act.argmax(dim=1)
+                    next_uses_item = ((next_act_idx == 2) | (next_act_idx == 3) | (next_act_idx == 4) | (
+                                next_act_idx == 6)).float()
+                    next_uses_rot = (next_act_idx == 3).float()
+                    next_uses_map = (next_act_idx != 2).float()
 
-                # Divide only by the number of active heads for that next action
-                active_heads = 1.0 + next_uses_item + next_uses_rot + next_uses_map
-                max_q = (max_nq_act + max_nq_item + max_nq_rot + max_nq_map) / active_heads
+                    max_nq_act = nq_act.max(dim=1)[0]
+                    max_nq_item = nq_item.max(dim=1)[0] * next_uses_item
+                    max_nq_rot = nq_rot.max(dim=1)[0] * next_uses_rot
+                    max_nq_map = nq_map.view(cfg.BATCH_SIZE, -1).max(dim=1)[0] * next_uses_map
 
-                r_tensor = torch.tensor(batch_reward, dtype=torch.float32, device=device)
-                d_tensor = torch.tensor(batch_done, dtype=torch.float32, device=device)
+                    # Divide only by the number of active heads for that next action
+                    active_heads = 1.0 + next_uses_item + next_uses_rot + next_uses_map
+                    max_q = (max_nq_act + max_nq_item + max_nq_rot + max_nq_map) / active_heads
 
-                target_vals = r_tensor + cfg.GAMMA * max_q * (1.0 - d_tensor)
+                    r_tensor = torch.tensor(batch_reward, dtype=torch.float32, device=device)
+                    d_tensor = torch.tensor(batch_done, dtype=torch.float32, device=device)
 
-            # 6. VECTORIZED MASKED LOSS CALCULATION
-            actions_t = torch.tensor(batch_action, dtype=torch.long, device=device)
-            act_idx = actions_t[:, 0]
-            item_idx = actions_t[:, 1]
-            rot_idx = actions_t[:, 2]
-            map_idx = actions_t[:, 3]
+                    target_vals = r_tensor + cfg.GAMMA * max_q * (1.0 - d_tensor)
 
-            batch_arange = torch.arange(cfg.BATCH_SIZE, device=device)
+                # 6. VECTORIZED MASKED LOSS CALCULATION
+                actions_t = torch.tensor(batch_action, dtype=torch.long, device=device)
+                act_idx = actions_t[:, 0]
+                item_idx = actions_t[:, 1]
+                rot_idx = actions_t[:, 2]
+                map_idx = actions_t[:, 3]
 
-            chosen_q_act = q_act_v[batch_arange, act_idx]
-            chosen_q_item = q_item_v[batch_arange, item_idx]
-            chosen_q_rot = q_rot_v[batch_arange, rot_idx]
-            chosen_q_map = q_map_v.view(cfg.BATCH_SIZE, -1)[batch_arange, map_idx]
+                batch_arange = torch.arange(cfg.BATCH_SIZE, device=device)
 
-            # Mask out heads that had no effect on the executed action
-            uses_item = ((act_idx == 2) | (act_idx == 3) | (act_idx == 4) | (act_idx == 6)).float()
-            uses_rot = (act_idx == 3).float()
-            uses_map = (act_idx != 2).float()
+                chosen_q_act = q_act_v[batch_arange, act_idx]
+                chosen_q_item = q_item_v[batch_arange, item_idx]
+                chosen_q_rot = q_rot_v[batch_arange, rot_idx]
+                chosen_q_map = q_map_v.view(cfg.BATCH_SIZE, -1)[batch_arange, map_idx]
 
-            loss_act = nn.functional.smooth_l1_loss(chosen_q_act, target_vals)
-            loss_item = (nn.functional.smooth_l1_loss(chosen_q_item, target_vals, reduction='none') * uses_item).mean()
-            loss_rot = (nn.functional.smooth_l1_loss(chosen_q_rot, target_vals, reduction='none') * uses_rot).mean()
-            loss_map = (nn.functional.smooth_l1_loss(chosen_q_map, target_vals, reduction='none') * uses_map).mean()
+                # Mask out heads that had no effect on the executed action
+                uses_item = ((act_idx == 2) | (act_idx == 3) | (act_idx == 4) | (act_idx == 6)).float()
+                uses_rot = (act_idx == 3).float()
+                uses_map = (act_idx != 2).float()
 
-            loss = loss_act + loss_item + loss_rot + loss_map
+                loss_act = nn.functional.smooth_l1_loss(chosen_q_act, target_vals)
+                loss_item = (nn.functional.smooth_l1_loss(chosen_q_item, target_vals, reduction='none') * uses_item).mean()
+                loss_rot = (nn.functional.smooth_l1_loss(chosen_q_rot, target_vals, reduction='none') * uses_rot).mean()
+                loss_map = (nn.functional.smooth_l1_loss(chosen_q_map, target_vals, reduction='none') * uses_map).mean()
 
-            # 7. BACKPROPAGATION
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
-            optimizer.step()
+                loss = loss_act + loss_item + loss_rot + loss_map
 
-            updates_done += 1
-            current_loss = loss.item()
+                # 7. BACKPROPAGATION
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
+                optimizer.step()
 
-            # 8. TARGET UPDATE & SYNC
-            if updates_done % cfg.TARGET_UPDATE == 0:
-                target_net.load_state_dict(policy_net.state_dict())
-                shared_policy.load_state_dict({k: v.cpu() for k, v in policy_net.state_dict().items()})
-                print(f"[Learner] Target updated & weights synced to CPU at {updates_done} updates. Loss: {current_loss:.4f}")
+                updates_done += 1
+                current_loss = loss.item()
 
-                # 9. DASHBOARD UPDATE
-                current_time = time.time()
-                if current_time - last_json_update > cfg.UPDATE_INTERVAL_SEC:
-                    elapsed_interval = current_time - last_json_update
-                    elapsed_tot = current_time - start_time_total
+                # 8. TARGET UPDATE & SYNC
+                if updates_done % cfg.TARGET_UPDATE == 0:
+                    target_net.load_state_dict(policy_net.state_dict())
+                    shared_policy.load_state_dict({k: v.cpu() for k, v in policy_net.state_dict().items()})
+                    print(
+                        f"[Learner] Target updated & weights synced to CPU at {updates_done} updates. Loss: {current_loss:.4f}")
 
-                    # Calculate rates for the interval
-                    updates_in_interval = updates_done - last_updates_count
-                    updates_per_sec = updates_in_interval / elapsed_interval
+                    # 9. DASHBOARD UPDATE
+                    current_time = time.time()
+                    if current_time - last_json_update > cfg.UPDATE_INTERVAL_SEC:
+                        elapsed_interval = current_time - last_json_update
+                        elapsed_tot = current_time - start_time_total
 
-                    steps_in_interval = total_steps_ingested - last_steps_ingested
-                    ingestion_rate = steps_in_interval / elapsed_interval
+                        updates_in_interval = updates_done - last_updates_count
+                        updates_per_sec = updates_in_interval / elapsed_interval
 
-                    # GPU Processing Rate (Samples per second)
-                    training_rate = updates_per_sec * cfg.BATCH_SIZE
+                        steps_in_interval = total_steps_ingested - last_steps_ingested
+                        ingestion_rate = steps_in_interval / elapsed_interval
 
-                    # UTD Ratio (How many training samples processed per 1 new environment step)
-                    utd_ratio = training_rate / ingestion_rate if ingestion_rate > 0 else 0.0
+                        training_rate = updates_per_sec * cfg.BATCH_SIZE
+                        utd_ratio = training_rate / ingestion_rate if ingestion_rate > 0 else 0.0
 
-                    # since macos isnt fully implemented we gotta do this
-                    try:
-                        current_qsize = exp_queue.qsize()
-                    except NotImplementedError:
-                        current_qsize = "N/A on Mac"
+                        try:
+                            current_qsize = exp_queue.qsize()
+                        except NotImplementedError:
+                            current_qsize = "N/A on Mac"
 
-                    state_dict = {
-                        "steps_ingested": total_steps_ingested,
-                        "updates_done": updates_done,
-                        "buffer_size": len(memory),
-                        "queue_size": current_qsize,
-                        "current_loss": round(current_loss, 4),
-                        "updates_per_sec": round(updates_per_sec, 2),
-                        "ingestion_rate": round(ingestion_rate, 2),
-                        "training_rate": round(training_rate, 2),
-                        "utd_ratio": round(utd_ratio, 2),
-                        "elapsed_total": elapsed_tot,
-                        "hyperparameters": hyperparameters,
-                        "num_actors": cfg.NUM_ACTORS
-                    }
+                        state_dict = {
+                            "steps_ingested": total_steps_ingested,
+                            "updates_done": updates_done,
+                            "buffer_size": len(memory),
+                            "queue_size": current_qsize,
+                            "current_loss": round(current_loss, 4),
+                            "updates_per_sec": round(updates_per_sec, 2),
+                            "ingestion_rate": round(ingestion_rate, 2),
+                            "training_rate": round(training_rate, 2),
+                            "utd_ratio": round(utd_ratio, 2),
+                            "elapsed_total": elapsed_tot,
+                            "hyperparameters": hyperparameters,
+                            "num_actors": cfg.NUM_ACTORS
+                        }
 
-                    dump_dashboard_state(state_dict)
+                        dump_dashboard_state(state_dict)
 
-                    last_json_update = current_time
-                    last_updates_count = updates_done
-                    last_steps_ingested = total_steps_ingested
+                        last_json_update = current_time
+                        last_updates_count = updates_done
+                        last_steps_ingested = total_steps_ingested
 
-                    #Autosave every once in a while
-                    if updates_done % (cfg.TARGET_UPDATE * 10) == 0:
-                        save_checkpoint(cfg.AUTOSAVE_PATH, policy_net, target_net, optimizer, memory, total_steps_ingested, updates_done)
+                    # 10. ROLLING AUTOSAVE & WEIGHTS EXPORT (Once every 30 minutes)
+                if time.time() - last_autosave_time >= autosave_interval:
+                    save_checkpoint(
+                        cfg.AUTOSAVE_PATH, policy_net, target_net, optimizer,
+                        memory, total_steps_ingested, updates_done, cfg
+                    )
+                    last_autosave_time = time.time()
+            else:
+                # Prevent 100% CPU spin-wait while waiting for initial chunks from actors
+                time.sleep(0.05)
+
+    finally:
+        # Save final checkpoint and weights when training stops or Ctrl+C is pressed
+        if updates_done > 0:
+            print("\n[Learner] Shutting down — saving final rolling checkpoint and weights...")
+            save_checkpoint(
+                cfg.AUTOSAVE_PATH, policy_net, target_net, optimizer,
+                memory, total_steps_ingested, updates_done, cfg
+            )
 
 
 # this line should make sure that any not implemented MPS operations will throw CPU fallback errors instead of crashing the process
@@ -602,10 +695,19 @@ def learner_loop(shared_policy, exp_queue, device, cfg):
 # we just use this line instead
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 
-if __name__ == '__main__':
+def main():
     mp.set_start_method('spawn', force=True)
 
-    # cfg already instantiated at module level above
+    global cfg
+    cfg = Config()  # Reload fresh config from user_config.json
+    os.makedirs(cfg.SAVE_FOLDER, exist_ok=True)
+
+    if os.path.exists(STOP_TRAIN_FILE):
+        try:
+            os.remove(STOP_TRAIN_FILE)
+        except OSError:
+            pass
+
     cpu_device = torch.device("cpu")
     if torch.cuda.is_available():
         gpu_device = torch.device("cuda")
@@ -631,21 +733,30 @@ if __name__ == '__main__':
 
     # 2. THEN start the learner loop on the main thread
     try:
-        learner_loop(shared_policy_net, experience_queue, gpu_device, cfg)
-
-
+        learner_loop(shared_policy_net, experience_queue, gpu_device, cfg, actor_processes)
+        print("[Master] Learner finished.")
     except KeyboardInterrupt:
-        print("\n[Master] Ctrl+C detected. Asking Actors to pack up and delete their containers...")
-
-        # We DO NOT use p.terminate() here anymore
-        # We wait for the Actors to run their `finally` blocks and close themselves
+        print("\n[Master] Ctrl+C detected. Signaling Actors to pack up and delete their containers...")
+        with open(STOP_TRAIN_FILE, "w") as f:
+            f.write("stop")
+    finally:
+        print("[Master] Waiting for Actor processes to clean up containers...")
         for p in actor_processes:
-            p.join(timeout=10)  # Give them up to 10 seconds to delete the containers
+            p.join(timeout=15)
 
-        # If any actor is totally frozen and didn't shut down after 10 seconds, THEN execute them
+        # If any actor is totally frozen and didn't shut down after 15 seconds, force terminate
         for p in actor_processes:
             if p.is_alive():
                 print(f"[Master] Force terminating stuck process: {p.name}")
                 p.terminate()
 
+        if os.path.exists(STOP_TRAIN_FILE):
+            try:
+                os.remove(STOP_TRAIN_FILE)
+            except OSError:
+                pass
+
         print("[Master] All containers deleted. Shutdown complete.")
+
+if __name__ == '__main__':
+    main()

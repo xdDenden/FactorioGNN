@@ -13,7 +13,7 @@ import traceback
 import json
 import docker
 import timeit
-
+import Actor
 from OrePatchDetector import OrePatchDetector
 from RunConfig import Config
 from environment import FactorioEnv
@@ -21,7 +21,7 @@ from FactorioHGNN import FactorioHGNN
 from mappings import get_available_items
 from rcon_bridge.rcon_bridge import Rcon_reciever
 from ActionMasking import get_action_masks
-
+STOP_PLAY_FILE = ".stop_play"
 """
 This is deprecated and outdated for the moment. Once this file gets brought inline with the others we will rewrite it.
 Renaming from main to PlayFactorioWithWeights to actually reflect what this script is supposed to do.
@@ -106,29 +106,22 @@ def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
         with torch.no_grad():
             q_act, q_item, q_rot, q_map, h_next = model(node_feats, H, hidden_state)
 
-            # 1. Mask Action
-            masked_q_act = apply_mask_to_logits(q_act.view(-1), act_mask)
-            act = masked_q_act.argmax().item()
-
-            # 2. Mask Item (dependent on action)
-            masked_q_item = apply_mask_to_logits(q_item.view(-1), item_mask[act])
-            item = masked_q_item.argmax().item()
-
-            # 3. Rotation
-            rot = q_rot.argmax().item()
-
-            # 4. Mask Heatmap (dependent on action)
-            masked_q_map = apply_mask_to_logits(q_map.view(-1), space_mask[act])
-            heatmap_idx = masked_q_map.argmax().item()
-
-            return act, item, rot, heatmap_idx, h_next
+def should_stop_play():
+    """Checks if the Streamlit UI requested a graceful stop for inference."""
+    return os.path.exists(STOP_PLAY_FILE)
 
 
-def play():
+def play(weights_path=None):
     cfg = Config()
     Config.VERBOSE = True
 
-    env = FactorioEnv(cfg)
+    if os.path.exists(STOP_PLAY_FILE):
+        try:
+            os.remove(STOP_PLAY_FILE)
+        except OSError:
+            pass
+
+    target_weights = Path(weights_path) if weights_path else Path(getattr(cfg, "WEIGHTS_PATH", WEIGHTS_PATH))
 
     # 1. Device Setup
     if torch.backends.mps.is_available():
@@ -138,138 +131,134 @@ def play():
     else:
         device = torch.device("cpu")
     print(f"Inference running on {device}")
-    print(f"Paths Configured -> Saves: {SAVE_FOLDER} | Pool: {SAVES_POOL}")
 
     # 2. Load Model
     model = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
 
-    if WEIGHTS_PATH.exists():
-        print(f"Loading weights from {WEIGHTS_PATH}...")
-        model.load_state_dict(torch.load(WEIGHTS_PATH, map_location=device, weights_only=True))
+    if target_weights.exists():
+        print(f"Loading weights from {target_weights}...")
+        model.load_state_dict(torch.load(target_weights, map_location=device, weights_only=True))
     else:
-        print(f"CRITICAL: Weights file {WEIGHTS_PATH} not found!")
+        print(f"CRITICAL: Weights file {target_weights} not found!")
         return
 
     model.eval()
 
-    # 3. Map Scheduler
+    # 3. Map Scheduler & Actor Setup (Using ID 99 so it doesn't collide with training actors)
     map_scheduler = MapScheduler(SAVES_POOL)
+    actor = Actor.ActorWorker(actor_id=99)
 
     print("\n=== STARTING INFINITE PLAY LOOP ===")
-    print("Press Ctrl+C to stop.")
+    print("Press Ctrl+C or click Stop Play in the UI to stop.")
 
-    while True:
-        # PREPARATION PHASE (Docker & Maps)
-        try:
-            # Pick Map
-            TARGET_SAVE = map_scheduler.get_next_map()
-            print(f"\nLoading Map: {TARGET_SAVE}")
+    try:
+        while not should_stop_play():
+            # PREPARATION PHASE (Handled automatically by ActorWorker)
+            try:
+                TARGET_SAVE = map_scheduler.get_next_map()
+                print(f"\nLoading Map: {TARGET_SAVE}")
+                map_source_path = str(SAVES_POOL / TARGET_SAVE)
 
-            # Docker Reset
-            docker_client = docker.from_env()
-            container = docker_client.containers.get(CONTAINER_NAME)
-
-            print(f"Resetting environment...")
-            container.stop()
-            time.sleep(2)
-
-            # Clean saves (Crossplatform way)
-            # Iterate over the SAVE_FOLDER using pathlib
-            for item in SAVE_FOLDER.iterdir():
-                if item.is_file():
-                    item.unlink() # Delete file
-                elif item.is_dir():
-                    shutil.rmtree(item) # Delete dir
-
-            # Copy new save
-            source_file = SAVES_POOL / TARGET_SAVE
-            dest_file = SAVE_FOLDER / TARGET_SAVE
-            shutil.copy2(source_file, dest_file)
-
-            container.start()
-            print("Server starting...")
-            time.sleep(10)  # Wait for boot
-
-            # Ore Scanning
-            receiver_ore = Rcon_reciever("localhost", "eenie7Uphohpaim", w27015)
-            ore_map = receiver_ore.scan_ore()
-            time.sleep(2)
-
-            detector = OrePatchDetector(ore_map)
-            patches = detector.process_patches()
-            receiver_ore.disconnect()
-            print(f"Ores detected: {len(patches)} patches found.")
-
-        except Exception as e:
-            print(f"Error during setup: {e}")
-            traceback.print_exc()
-            time.sleep(5)
-            continue
-
-        # GAMEPLAY PHASE
-        obs = env.reset()
-        if obs is None: continue
-
-        hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
-                        torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
-
-        total_reward = 0
-
-        with tqdm(range(cfg.MAX_TIMESTEPS), desc=f"Playing {TARGET_SAVE}", unit="step") as pbar:
-            for t in pbar:
-                if t > 0:
-                    obs = env.get_observation()
-
-                node_feats, H = obs
-                node_feats = node_feats.to(device)
-                H = H.to(device)
-
-                # Update Masks
-                raw_entities = env._last_raw_entities
-                raw_player = env._last_raw_player
-                inventory = {item.get('name'): item.get('count', 0) for item in raw_player.get('inventory', [])}
-                bounds = env.current_bounds
-                research = env.receiver.scan_research()
-                valid_items = get_available_items(research)
-
-                masks = get_action_masks(
-                    entities=raw_entities,
-                    player_info=raw_player,
-                    inventory=inventory,
-                    available_items=valid_items,
-                    bounds=bounds,
-                    patches=patches,
-                    move_state=env.move_state
-                )
-
-                act, item, rot, map_idx, next_hidden = select_action(
-                    model, node_feats, H, hidden_state, epsilon_inference, device, masks
-                )
-
-                hidden_state = next_hidden
-
-                # Convert Coords
-                y_grid = map_idx // 17
-                x_grid = map_idx % 17
-                x_norm = -1.0 + (x_grid / 16.0) * 2.0
-                y_norm = -1.0 + (y_grid / 16.0) * 2.0
-
-                next_obs, reward, done, _ = env.step(act, item, rot, x_norm, y_norm)
-                total_reward += reward
-
-                pbar.set_postfix(Reward=f"{total_reward:.1f}", LastAct=act)
-
-                if done:
-                    print(f"\nEpisode finished. Total Reward: {total_reward}")
+                if should_stop_play():
                     break
 
-        env.close()
-        print("Moving to next map...")
+                actor.prepare_map_and_ores(map_source_path)
+                env = actor.env
+            except Exception as e:
+                if should_stop_play():
+                    break
+                print(f"Error during setup: {e}")
+                traceback.print_exc()
+                time.sleep(5)
+                continue
+
+            if should_stop_play():
+                break
+
+            # GAMEPLAY PHASE
+            obs = env.reset()
+            if obs is None:
+                continue
+
+            patches = env.current_patches
+            hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
+                            torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
+
+            total_reward = 0
+
+            with tqdm(range(cfg.MAX_TIMESTEPS), desc=f"Playing {TARGET_SAVE}", unit="step") as pbar:
+                for t in pbar:
+                    if should_stop_play():
+                        print("\nStop signal received. Exiting play loop...")
+                        break
+
+                    if t > 0:
+                        obs = env._last_obs
+
+                    node_feats, H = obs
+                    node_feats = node_feats.to(device)
+                    H = H.to(device)
+
+                    # Update Masks
+                    raw_entities = env._last_raw_entities
+                    raw_player = env._last_raw_player
+                    inventory = {item.get('name'): item.get('count', 0) for item in raw_player.get('inventory', [])}
+                    bounds = env.current_bounds
+                    if t == 0 or t % 50 == 0:
+                        research = env.receiver.scan_research()
+                        valid_items = get_available_items(research)
+
+                    masks = get_action_masks(
+                        entities=raw_entities,
+                        player_info=raw_player,
+                        inventory=inventory,
+                        available_items=valid_items,
+                        bounds=bounds,
+                        patches=patches,
+                        move_state=env.move_state
+                    )
+
+                    act, item, rot, map_idx, next_hidden = select_action(
+                        model, node_feats, H, hidden_state, epsilon_inference, device, masks
+                    )
+
+                    hidden_state = next_hidden
+
+                    # Convert Coords
+                    y_grid = map_idx // 17
+                    x_grid = map_idx % 17
+                    x_norm = -1.0 + (x_grid / 16.0) * 2.0
+                    y_norm = -1.0 + (y_grid / 16.0) * 2.0
+
+                    next_obs, reward, done, _ = env.step(act, item, rot, x_norm, y_norm)
+                    total_reward += reward
+
+                    pbar.set_postfix(Reward=f"{total_reward:.1f}", LastAct=act)
+
+                    if done:
+                        print(f"\nEpisode finished. Total Reward: {total_reward}")
+                        break
+
+            if should_stop_play():
+                break
+
+            print("Moving to next map...")
+    finally:
+        actor.stop()
+        if os.path.exists(STOP_PLAY_FILE):
+            try:
+                os.remove(STOP_PLAY_FILE)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--weights", type=str, default=None, help="Path to weights .pth file")
+    args = parser.parse_args()
     try:
-        play()
+        play(weights_path=args.weights)
     except KeyboardInterrupt:
         print("\nExiting...")
     except Exception as e:
