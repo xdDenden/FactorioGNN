@@ -8,7 +8,7 @@ from OrePatchDetector import OrePatchDetector
 from environment import FactorioEnv
 from RunConfig import Config
 from rcon_bridge.rcon_bridge import Rcon_reciever
-
+TEMPLATE_PATH = os.path.abspath("./server-settings.json")
 
 class ActorWorker:
     def __init__(self, actor_id, base_rcon_port=27015, base_game_port=34197):
@@ -44,7 +44,7 @@ class ActorWorker:
 
         # Copy the mod into this specific actor's isolated mods folder
         if os.path.exists(target_mod_dir):
-            shutil.rmtree(target_mod_dir)  # Refresh it in case you made script changes
+            shutil.rmtree(target_mod_dir)  # Refresh it just in case
         shutil.copytree(source_mod_dir, target_mod_dir)
 
         # 3. Inject the RCON password BEFORE the container boots
@@ -52,32 +52,26 @@ class ActorWorker:
         with open(rconpw_path, "w") as f:
             f.write(cfg.RCON_PASSWORD)
 
-            # Aggressive Cleanup
-            try:
-                old_container = client.containers.get(self.container_name)
-                print(f"\n[actor {self.actor_id}] Found stuck container (status: {old_container.status}). Last 25 Factorio log lines:")
-                try:
-                    print(old_container.logs(tail=25).decode('utf-8'))
-                except Exception as log_err:
-                    print(f"Could not read logs: {log_err}")
-                print(f"[actor {self.actor_id}] Stopping stuck container...\n")
-                try:
-                    old_container = client.containers.get(self.container_name)
-                    old_container.stop()
-                    old_container.remove(force=True)
-                except docker.errors.NotFound:
-                    pass
-                except docker.errors.NotFound:
-                    pass
-            except docker.errors.APIError as e:
-                # If Docker is already removing it automatically, just let it happen quietly
-                if e.response.status_code == 409 and "already in progress" in str(e):
-                    pass
-                else:
-                    print(f"[actor {self.actor_id}] Cleanup warning: {e}")
+        with open(TEMPLATE_PATH) as f:
+            server_settings = json.load(f)
 
-            # Give the port and name 3 seconds to fully release
-            time.sleep(3)
+        server_settings["name"] = f"Factorio_RL_Actor_{self.actor_id}"
+
+        with open(os.path.join(self.config_dir,"server-settings.json"), "w") as f:
+            json.dump(server_settings, f, indent=2)
+
+        # 3c. Clean up any existing container quietly
+        try:
+            old_container = client.containers.get(self.container_name)
+            old_container.stop(timeout=3)
+            old_container.remove(force=True)
+            time.sleep(1)
+        except docker.errors.NotFound:
+        # Normal on initial startup ! disregard completely!
+            pass
+        except docker.errors.APIError as e:
+            if e.response.status_code != 409:
+                print(f"[actor {self.actor_id}] Cleanup warning: {e}")
 
         # 4. START NEW CONTAINER
         print(f"[actor {self.actor_id}] Spinning up container on port {self.rcon_port}...")
@@ -91,11 +85,11 @@ class ActorWorker:
             },
             volumes={self.base_dir: {'bind': '/factorio', 'mode': 'rw'}},
             detach=True,
-            remove=not bool(cfg.VERBOSE)
+            remove= False
             )
 
         print(f"[actor {self.actor_id}] Waiting for Factorio server to boot...")
-        time.sleep(10)
+        time.sleep(8)
 
         # 5. SMART POLLING LOOP
         import rcon_bridge.rcon_bridge as bridge
@@ -120,7 +114,7 @@ class ActorWorker:
 
                 # Bypass the JSON parser temporarily to see what Factorio is ACTUALLY saying
                 test_receiver.reset()
-                time.sleep(5)
+                time.sleep(2)
                 raw_response = test_receiver._send_command_with_retry("/char_info")
 
                 # CASE 1: Mod not ready yet (NOT a crash)
@@ -175,6 +169,7 @@ class ActorWorker:
         self.env = FactorioEnv(cfg, rcon_port=self.rcon_port)
         self.env.actor_id = self.actor_id
 
+
     def stop(self):
         """Gracefully stops and explicitly removes the container."""
         # Safely get the actor_id
@@ -190,9 +185,20 @@ class ActorWorker:
             except Exception as e:
                 print(f"[Actor {a_id}] Error during container deletion: {e}")
         else:
-            print(f"[Actor {a_id}] No container found to delete. Shutting down.")
+            print(f"[Actor {a_id}] No container found to delete")
+
+
     def prepare_map_and_ores(self, map_source_path):
         """Handles independent map loading and actor environment setup."""
+        # Close old RCON socket and stop previous episode's container cleanly BEFORE touching save files
+        if self.env is not None:
+            try:
+                self.env.close()
+            except Exception:
+                pass
+        if self.container is not None:
+            self.stop()
+
         # 1. Clean and setup unique save directory
         if os.path.exists(self.save_dir):
             shutil.rmtree(self.save_dir)
@@ -205,8 +211,4 @@ class ActorWorker:
         # 2. Spin up container and init env
         self.spin_up_container()
         self.init_environment()
-
-
-        # We return an empty list because train_dqn.py overwrites this
-        # variable immediately with actor.env.current_patches anyway!
         return []

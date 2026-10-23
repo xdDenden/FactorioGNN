@@ -384,8 +384,8 @@ with main_tabs[1]:
         with c_debug:
             st.subheader("UI & Debugging")
             update_interval = st.number_input("UPDATE_INTERVAL_SEC", min_value=1.0, value=float(cfg.UPDATE_INTERVAL_SEC), step=0.5)
-            verbose = st.checkbox("VERBOSE (Keep crashed containers & print steps)", value=bool(cfg.VERBOSE))
-            save_graphs = st.checkbox("SAVE_GRAPHS (Export GraphML every step)", value=bool(cfg.SAVE_GRAPHS))
+            verbose = st.checkbox("VERBOSE (Prints individual steps)", value=bool(cfg.VERBOSE))
+            save_graphs = st.checkbox("SAVE_GRAPHS (Export GraphML every step (one agent max))", value=bool(cfg.SAVE_GRAPHS))
 
         submitted = st.form_submit_button("Save Parameters for Current & Next Startup", width="stretch", type="primary")
         if submitted:

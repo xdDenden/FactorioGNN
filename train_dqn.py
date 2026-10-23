@@ -327,6 +327,8 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg, initial_steps=0)
 
                 local_policy.load_state_dict(shared_policy.state_dict())
 
+                valid_items = []
+
                 for t in range(cfg.MAX_TIMESTEPS):
                     if should_stop():
                         print(f"[Actor {actor_id}] Stop signal detected. Aborting episode cleanly...")
@@ -346,8 +348,21 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg, initial_steps=0)
                     raw_player = actor.env._last_raw_player
                     inv_list = raw_player.get('inventory', [])
                     inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
+
+                    # 1. Protect scan_research RCON call
                     if t == 0 or t % 50 == 0:
-                        valid_items = get_available_items(actor.env.receiver.scan_research())
+                        try:
+                            valid_items = get_available_items(actor.env.receiver.scan_research())
+                        except Exception as res_err:
+                            print(f"\n[Actor {actor_id}] scan_research failed at step {t}: {res_err}. Reconnecting RCON...")
+                            try:
+                                actor.env.receiver.disconnect()
+                                time.sleep(1.0)
+                                actor.env.receiver.connect()
+                                valid_items = get_available_items(actor.env.receiver.scan_research())
+                            except Exception as recon_err:
+                                print(f"[Actor {actor_id}] RCON reconnect failed ({recon_err}), aborting episode.")
+                                break
 
                     masks = get_action_masks(
                         entities=raw_entities, player_info=raw_player, inventory=inventory,
@@ -368,7 +383,21 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg, initial_steps=0)
                     x_norm = -1.0 + (x_grid / 16.0) * 2.0
                     y_norm = -1.0 + (y_grid / 16.0) * 2.0
 
-                    next_obs, reward, done, info = actor.env.step(act, item, rot, x_norm, y_norm)
+                    # 2. Protect env.step RCON call
+                    try:
+                        next_obs, reward, done, info = actor.env.step(act, item, rot, x_norm, y_norm)
+                    except Exception as step_err:
+                        print(f"\n[Actor {actor_id}] Transient error at step {t}: {step_err}. Reconnecting RCON...")
+                        traceback.print_exc()
+                        try:
+                            actor.env.receiver.disconnect()
+                            time.sleep(1.0)
+                            actor.env.receiver.connect()
+                        except Exception as recon_err:
+                            print(f"[Actor {actor_id}] RCON reconnect failed ({recon_err}), aborting episode.")
+                            break
+                        continue
+
                     episode_reward += reward
 
                     if next_obs is not None:
@@ -395,6 +424,7 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg, initial_steps=0)
                     steps_since_sync += 1
                     actor_steps += 1
 
+                    # Calculate Iterations / Sec and update dashboard
                     if t % 50 == 0 or done:
                         current_time = time.time()
                         elapsed = current_time - last_log_time
@@ -412,8 +442,8 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg, initial_steps=0)
                     if done:
                         break
 
-                if should_stop():
-                    break
+                    if should_stop():
+                        break
 
                 if len(local_buffer) > 0:
                     exp_queue.put(local_buffer)
@@ -730,7 +760,6 @@ def main():
                 os.remove(STOP_TRAIN_FILE)
             except OSError:
                 pass
-
         print("[Master] All containers deleted. Shutdown complete.")
 
 if __name__ == '__main__':
