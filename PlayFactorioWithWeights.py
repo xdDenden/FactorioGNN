@@ -21,6 +21,8 @@ from FactorioHGNN import FactorioHGNN
 from mappings import get_available_items
 from rcon_bridge.rcon_bridge import Rcon_reciever
 from ActionMasking import get_action_masks
+from train_dqn import apply_mask_to_logits, select_action
+
 STOP_PLAY_FILE = ".stop_play"
 """
 This is deprecated and outdated for the moment. Once this file gets brought inline with the others we will rewrite it.
@@ -64,47 +66,6 @@ class MapScheduler:
             self.queue = [f.name for f in self.pool_path.iterdir() if f.suffix == '.zip']
             random.shuffle(self.queue)
         return self.queue.pop()
-
-
-def apply_mask_to_logits(logits, mask):
-    """Sets logits to -inf where mask is 0."""
-    if not isinstance(mask, torch.Tensor):
-        mask_t = torch.tensor(mask, device=logits.device, dtype=torch.bool)
-    else:
-        mask_t = mask.bool()
-
-    masked_logits = logits.clone()
-    masked_logits[~mask_t] = -1e9
-    return masked_logits
-
-
-def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
-    """
-    Identical to training logic, but allows us to force low/zero epsilon.
-    """
-    act_mask, item_mask, space_mask = masks
-
-    # Even in inference, a tiny bit of epsilon helps break "wiggling" loops
-    if random.random() < epsilon:
-        # --- MASKED RANDOM ---
-        valid_actions = np.nonzero(act_mask)[0]
-        act = random.choice(valid_actions) if len(valid_actions) > 0 else 0
-
-        valid_items = np.nonzero(item_mask[act])[0]
-        item = random.choice(valid_items) if len(valid_items) > 0 else 0
-
-        rot = random.randint(0, 3)
-
-        valid_locs = np.nonzero(space_mask[act])[0]
-        heatmap_idx = random.choice(valid_locs) if len(valid_locs) > 0 else 0
-
-        h_next = (torch.zeros(1, 256).to(device), torch.zeros(1, 256).to(device))
-        return act, item, rot, heatmap_idx, h_next
-
-    else:
-        # MASKED GREEDY
-        with torch.no_grad():
-            q_act, q_item, q_rot, q_map, h_next = model(node_feats, H, hidden_state)
 
 def should_stop_play():
     """Checks if the Streamlit UI requested a graceful stop for inference."""

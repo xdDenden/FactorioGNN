@@ -29,6 +29,7 @@ class ActorWorker:
     def spin_up_container(self):
         """Spins up the Docker container for this specific actor."""
         client = docker.from_env()
+        cfg = Config()
 
         # 2. Ensure directories exist
         os.makedirs(self.save_dir, exist_ok=True)
@@ -49,13 +50,12 @@ class ActorWorker:
         # 3. Inject the RCON password BEFORE the container boots
         rconpw_path = os.path.join(self.config_dir, "rconpw")
         with open(rconpw_path, "w") as f:
-            f.write("eenie7Uphohpaim")
+            f.write(cfg.RCON_PASSWORD)
 
             # Aggressive Cleanup
             try:
                 old_container = client.containers.get(self.container_name)
-                print(
-                    f"\n[actor {self.actor_id}] Found stuck container (status: {old_container.status}). Last 25 Factorio log lines:")
+                print(f"\n[actor {self.actor_id}] Found stuck container (status: {old_container.status}). Last 25 Factorio log lines:")
                 try:
                     print(old_container.logs(tail=25).decode('utf-8'))
                 except Exception as log_err:
@@ -65,6 +65,8 @@ class ActorWorker:
                     old_container = client.containers.get(self.container_name)
                     old_container.stop()
                     old_container.remove(force=True)
+                except docker.errors.NotFound:
+                    pass
                 except docker.errors.NotFound:
                     pass
             except docker.errors.APIError as e:
@@ -80,33 +82,16 @@ class ActorWorker:
         # 4. START NEW CONTAINER
         print(f"[actor {self.actor_id}] Spinning up container on port {self.rcon_port}...")
 
-        cfg = Config()
-        # makes sure we can inspect the docker logs if we want to by not instantly deleting
-        # the containers if a crash or exit does occur
-        # by default it should remove all of them
-        if cfg.VERBOSE == True:
-            self.container = client.containers.run(
-                "factoriotools/factorio:2.0.72",
-                name=self.container_name,
-                ports={
-                    '27015/tcp': self.rcon_port,
-                    '34197/udp': self.game_port
-                },
-                volumes={self.base_dir: {'bind': '/factorio', 'mode': 'rw'}},
-                detach=True,
-                remove=False
-            )
-        else:
-            self.container = client.containers.run(
-                "factoriotools/factorio:2.0.72",
-                name=self.container_name,
-                ports={
-                    '27015/tcp': self.rcon_port,
-                    '34197/udp': self.game_port
-                },
-                volumes={self.base_dir: {'bind': '/factorio', 'mode': 'rw'}},
-                detach=True,
-                remove=True
+        self.container = client.containers.run(
+            "factoriotools/factorio:2.0.72",
+            name=self.container_name,
+            ports={
+                '27015/tcp': self.rcon_port,
+                '34197/udp': self.game_port
+            },
+            volumes={self.base_dir: {'bind': '/factorio', 'mode': 'rw'}},
+            detach=True,
+            remove=not bool(cfg.VERBOSE)
             )
 
         print(f"[actor {self.actor_id}] Waiting for Factorio server to boot...")
@@ -130,7 +115,7 @@ class ActorWorker:
             test_receiver = None
 
             try:
-                test_receiver = bridge.Rcon_reciever("localhost", "eenie7Uphohpaim", self.rcon_port)
+                test_receiver = bridge.Rcon_reciever(cfg.RCON_HOST, cfg.RCON_PASSWORD, self.rcon_port)
                 test_receiver.connect()
 
                 # Bypass the JSON parser temporarily to see what Factorio is ACTUALLY saying

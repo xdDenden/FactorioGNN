@@ -186,9 +186,8 @@ def preprocess_features_for_gnn(feature_list: List[Dict[str, Any]],
 
 class HypergraphConv(nn.Module):
     """
-    Hypergraph convolution layer.
-    Updated with robust normalization D_v^-1 * H * D_e^-1 * H^T
-
+    Hypergraph convolution layer using O(N*E) elementwise degree normalization
+    instead of dense diagonal matrix multiplications.
     """
 
     def __init__(self, in_features, out_features):
@@ -202,55 +201,32 @@ class HypergraphConv(nn.Module):
         if H.dim() == 2:
             # Single instance case
             N, E = H.shape
-            if E == 0:
+            if E == 0 or N == 0:
                 return torch.zeros((N, self.out_features), device=x.device)
 
-            # 1. Edge Degree D_e
-            d_e = H.sum(dim=0)
-            d_e_inv = torch.pow(d_e + 1e-6, -1.0)
-            D_e_inv = torch.diag(d_e_inv)
+            # d_e_inv: (E,), d_v_inv: (N,)
+            d_e_inv = torch.pow(H.sum(dim=0) + 1e-6, -1.0)
+            d_v_inv = torch.pow(H.sum(dim=1) + 1e-6, -1.0)
 
-            # 2. Node Degree D_v (Sum of rows of H)
-            d_v = H.sum(dim=1)
-            d_v_inv = torch.pow(d_v + 1e-6, -1.0)
-            D_v_inv = torch.diag(d_v_inv)
-
-            # 3. Adjacency with Normalization
-            # A = D_v_inv @ H @ D_e_inv @ H.T
-            H_T = H.transpose(0, 1)
-            A = D_v_inv @ H @ D_e_inv @ H_T
-
-            # 4. Propagation
-            output = A @ x @ self.weight
-            return output
+            # Elementwise broadcast: (N, 1) * (N, E) * (1, E) -> (N, E)
+            H_norm = d_v_inv.unsqueeze(-1) * H * d_e_inv.unsqueeze(0)
+            A = H_norm @ H.transpose(0, 1)  # (N, N)
+            return A @ (x @ self.weight)
 
         elif H.dim() == 3:
-            # Batched case
             B, N, E = H.shape
-            if E == 0:
+            if E == 0 or N == 0:
                 return torch.zeros((B, N, self.out_features), device=x.device)
 
-            # 1. Edge Degree
-            d_e = H.sum(dim=1)
-            d_e_inv = torch.pow(d_e + 1e-6, -1.0)
-            D_e_inv = torch.diag_embed(d_e_inv)
+            # d_e_inv: (B, E), d_v_inv: (B, N)
+            d_e_inv = torch.pow(H.sum(dim=1) + 1e-6, -1.0)
+            d_v_inv = torch.pow(H.sum(dim=2) + 1e-6, -1.0)
 
-            # 2. Node Degree
-            d_v = H.sum(dim=2)  # Sum across edges for each node
-            d_v_inv = torch.pow(d_v + 1e-6, -1.0)
-            D_v_inv = torch.diag_embed(d_v_inv)
-
-            # 3. Adjacency
-            H_T = H.transpose(1, 2)
-            # A = D_v_inv @ H @ D_e_inv @ H_T
-            term1 = torch.bmm(D_v_inv, H)
-            term2 = torch.bmm(term1, D_e_inv)
-            A = torch.bmm(term2, H_T)
-
-            # 4. Propagation
-            x_w = x @ self.weight
-            output = torch.bmm(A, x_w)
-            return output
+            # Elementwise broadcast: (B, N, 1) * (B, N, E) * (B, 1, E) -> (B, N, E)
+            H_norm = d_v_inv.unsqueeze(-1) * H * d_e_inv.unsqueeze(1)
+            A = torch.bmm(H_norm, H.transpose(1, 2))  # (B, N, N)
+            x_w = x @ self.weight                     # (B, N, out_features)
+            return torch.bmm(A, x_w)
         else:
             raise ValueError("Incidence matrix H must be 2D or 3D.")
 
@@ -290,7 +266,7 @@ class FactorioHGNN(nn.Module):
                  hidden_dim: int = 256,
                  lstm_hidden_dim: int = 256,
                  n_actions: int = N_ACTIONS,
-                 n_items: int = N_RECIPES
+                 n_items: int = N_ITEM_TYPES
                  ):
         super(FactorioHGNN, self).__init__()
 

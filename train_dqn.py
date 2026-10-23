@@ -106,56 +106,46 @@ def apply_mask_to_logits(logits, mask):
 
 def select_action(model, node_feats, H, hidden_state, epsilon, device, masks):
     """
-    Epsilon-Greedy with Action Masking.
-    masks: (action_mask, item_mask, spatial_mask) from ActionMasking.py
+    Epsilon-Greedy with Action Masking and Item conditioned Build Spatial Masking.
+    Always advances the LSTM hidden_state even on random exploratory steps.
     """
-    act_mask, item_mask, space_mask = masks
+    act_mask, item_mask, space_mask, *extra = masks
+    build_spatial_by_item = extra[0] if extra else {}
+
+    with torch.no_grad():
+        q_act, q_item, q_rot, q_map, h_next = model(node_feats, H, hidden_state)
 
     if random.random() < epsilon:
-        # MASKED RANDOM EXPLORATION
-
-        # 1. Select Action from valid indices
         valid_actions = np.nonzero(act_mask)[0]
-        act = random.choice(valid_actions) if len(valid_actions) > 0 else 0
+        act = int(random.choice(valid_actions)) if len(valid_actions) > 0 else 0
 
         # 2. Select Item from valid indices FOR THAT ACTION
         # item_mask is [num_actions, num_items]
         valid_items = np.nonzero(item_mask[act])[0]
-        item = random.choice(valid_items) if len(valid_items) > 0 else 0
+        item = int(random.choice(valid_items)) if len(valid_items) > 0 else 0
 
         # 3. Select Rotation (Unmasked for now)
         rot = random.randint(0, 3)
 
-        # 4. Select Heatmap Location from valid indices FOR THAT ACTION
-        # space_mask is [num_actions, grid_size]
-        valid_locs = np.nonzero(space_mask[act])[0]
-        heatmap_idx = random.choice(valid_locs) if len(valid_locs) > 0 else 0
+        active_space_mask = build_spatial_by_item.get(item, space_mask[act]) if act == 3 else space_mask[act]
+        valid_locs = np.nonzero(active_space_mask)[0]
+        heatmap_idx = int(random.choice(valid_locs)) if len(valid_locs) > 0 else 0
 
-        h_next = (torch.zeros(1, cfg.HIDDEN_DIM).to(device), torch.zeros(1, cfg.HIDDEN_DIM).to(device))
         return act, item, rot, heatmap_idx, h_next
-
     else:
-        # MASKED GREEDY EXPLOITATION
-        with torch.no_grad():
-            q_act, q_item, q_rot, q_map, h_next = model(node_feats, H, hidden_state)
-
-            # 1. Mask Action Logits
             masked_q_act = apply_mask_to_logits(q_act.view(-1), act_mask)
             act = masked_q_act.argmax().item()
 
-            # 2. Mask Item Logits (based on chosen action)
-            # q_item is [1, num_items], item_mask[act] is [num_items]
             masked_q_item = apply_mask_to_logits(q_item.view(-1), item_mask[act])
             item = masked_q_item.argmax().item()
 
-            # 3. Rotation (Unmasked)
             rot = q_rot.argmax().item()
 
-            # 4. Mask Heatmap (based on chosen action)
-            masked_q_map = apply_mask_to_logits(q_map.view(-1), space_mask[act])
-            heatmap_idx = masked_q_map.argmax().item()
+    active_space_mask = build_spatial_by_item.get(item, space_mask[act]) if act == 3 else space_mask[act]
+    masked_q_map = apply_mask_to_logits(q_map.view(-1), active_space_mask)
+    heatmap_idx = masked_q_map.argmax().item()
 
-            return act, item, rot, heatmap_idx, h_next
+    return act, item, rot, heatmap_idx, h_next
 
 def dump_dashboard_state(state_dict):
     """Safely write state to JSON so Streamlit can read it."""
@@ -292,30 +282,23 @@ def should_stop():
     return os.path.exists(STOP_TRAIN_FILE)
 
 # 1. THE ACTOR LOOP (Runs in multiple processes)
-def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
+# Replace actor_loop and learner_loop in train_dqn.py (Lines 268-595)
+
+def actor_loop(actor_id, shared_policy, exp_queue, device, cfg, initial_steps=0):
     print(f"[Actor {actor_id}] Booting up on {device}...")
 
     map_scheduler = MapScheduler(cfg.SAVES_POOL)
     actor = Actor.ActorWorker(actor_id)
-
-    # Local Replica
-    # To prevent lock contention, actors infer from a local copy.
     local_policy = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
+    local_policy.eval()
 
-    CHUNK_SIZE = 32
-    SYNC_INTERVAL = 128
-
-    # Simple global step counter for epsilon decay
-    actor_steps = 0
-
-    # Timing trackers for Iterations / Sec
+    actor_steps = initial_steps
     last_log_time = time.time()
-    last_log_steps = 0
-
-    # Episode tracking for the dashboard
+    last_log_steps = actor_steps
     episodes_completed = 0
 
-    max_episodes = (getattr(cfg, 'NUM_EPISODES') * getattr(cfg, 'NUM_ACTORS'))
+    # Each actor runs cfg.NUM_EPISODES episodes (matches StreamlitUpdate.py telemetry)
+    max_episodes = getattr(cfg, 'NUM_EPISODES', 2)
 
     try:
         while episodes_completed < max_episodes and not should_stop():
@@ -326,7 +309,7 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                 if should_stop():
                     break
 
-                patches = actor.prepare_map_and_ores(map_source_path)
+                actor.prepare_map_and_ores(map_source_path)
                 if should_stop():
                     break
 
@@ -335,14 +318,13 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                     continue
 
                 patches = actor.env.current_patches
-                hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device),
-                                torch.zeros(1, cfg.LSTM_HIDDEN_DIM).to(device))
+                hidden_state = (torch.zeros(1, cfg.LSTM_HIDDEN_DIM, device=device),
+                                torch.zeros(1, cfg.LSTM_HIDDEN_DIM, device=device))
 
                 local_buffer = []
                 steps_since_sync = 0
                 episode_reward = 0.0
 
-                # Sync weights at the start of every episode
                 local_policy.load_state_dict(shared_policy.state_dict())
 
                 for t in range(cfg.MAX_TIMESTEPS):
@@ -366,6 +348,7 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                     inventory = {item.get('name'): item.get('count', 0) for item in inv_list}
                     if t == 0 or t % 50 == 0:
                         valid_items = get_available_items(actor.env.receiver.scan_research())
+
                     masks = get_action_masks(
                         entities=raw_entities, player_info=raw_player, inventory=inventory,
                         available_items=valid_items, bounds=actor.env.current_bounds,
@@ -377,7 +360,6 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                         cfg.EPSILON_START - (cfg.EPSILON_START - cfg.EPSILON_END) * (actor_steps / cfg.EPSILON_DECAY)
                     )
 
-                    # Infer from LOCAL policy
                     act, item, rot, map_idx, next_hidden = select_action(
                         local_policy, node_feats, H, hidden_state, epsilon, device, masks
                     )
@@ -392,11 +374,16 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                     if next_obs is not None:
                         s_nodes_cpu, s_H_cpu = node_feats.detach().cpu(), H.detach().cpu()
                         ns_nodes_cpu, ns_H_cpu = next_obs[0].detach().cpu(), next_obs[1].detach().cpu()
+                        h_cpu = (hidden_state[0].detach().cpu(), hidden_state[1].detach().cpu())
+                        nh_cpu = (next_hidden[0].detach().cpu(), next_hidden[1].detach().cpu())
                         action_tuple = (act, item, rot, map_idx)
 
-                        # Append to local chunk buffer
                         local_buffer.append((
-                            (s_nodes_cpu, s_H_cpu), action_tuple, reward, (ns_nodes_cpu, ns_H_cpu), done
+                            (s_nodes_cpu, s_H_cpu, h_cpu),
+                            action_tuple,
+                            reward,
+                            (ns_nodes_cpu, ns_H_cpu, nh_cpu),
+                            done
                         ))
 
                         if len(local_buffer) >= cfg.CHUNK_SIZE:
@@ -408,7 +395,6 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                     steps_since_sync += 1
                     actor_steps += 1
 
-                    # Calculate Iterations / Sec and update dashboard
                     if t % 50 == 0 or done:
                         current_time = time.time()
                         elapsed = current_time - last_log_time
@@ -429,11 +415,9 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
                 if should_stop():
                     break
 
-                # Empty remaining buffer at end of episode
                 if len(local_buffer) > 0:
                     exp_queue.put(local_buffer)
 
-                # Episode finished: count it and tell the dashboard (step reset to 0 for the next map boot)
                 episodes_completed += 1
                 dump_actor_state(actor_id, target_save, epsilon, 0, 0.0, actor_steps, 0.0,
                                  reward_breakdown={},
@@ -456,43 +440,36 @@ def actor_loop(actor_id, shared_policy, exp_queue, device, cfg):
     finally:
         actor.stop()
 
+#TODO: Readd comments from earlier commit
 
 # 2. THE LEARNER LOOP (Runs on Main Thread)
 def learner_loop(shared_policy, exp_queue, device, cfg, actor_processes):
     print(f"[Learner] Starting up on {device}...")
 
-    # GPU Models
     policy_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
-    policy_net.load_state_dict(shared_policy.state_dict())  # Init from CPU
+    policy_net.load_state_dict(shared_policy.state_dict())
 
     target_net = FactorioHGNN(hidden_dim=cfg.HIDDEN_DIM, lstm_hidden_dim=cfg.LSTM_HIDDEN_DIM).to(device)
     target_net.load_state_dict(policy_net.state_dict())
     target_net.eval()
 
     optimizer = optim.Adam(policy_net.parameters(), lr=cfg.LR)
-    #criterion = nn.MSELoss()
-    criterion = nn.SmoothL1Loss()
-    # we believe that smoothL1loss is a better fit since it handles our milestone rewards better
     memory = ReplayBuffer(cfg.BUFFER_SIZE)
 
-    updates_done = 0
-    total_steps_ingested = 0
-
-    # Always attempt to load from rolling checkpoints or base AUTOSAVE_PATH
     total_steps_ingested, updates_done = load_checkpoint(
         cfg.AUTOSAVE_PATH, policy_net, target_net, optimizer, memory
     )
-    if updates_done == 0:
+    if updates_done > 0:
+        shared_policy.load_state_dict({k: v.cpu() for k, v in policy_net.state_dict().items()})
+    else:
         policy_net.load_state_dict(shared_policy.state_dict())
         target_net.load_state_dict(policy_net.state_dict())
 
     target_net.eval()
 
-    MIN_BUFFER_SIZE = cfg.BATCH_SIZE * 5
-
     last_json_update = time.time()
     last_autosave_time = time.time()
-    autosave_interval = getattr(cfg, 'AUTOSAVE_INTERVAL_SEC', 1800.0)  # 30 minutes
+    autosave_interval = getattr(cfg, 'AUTOSAVE_INTERVAL_SEC', 1800.0)
     last_updates_count = updates_done
     start_time_total = time.time()
     last_steps_ingested = total_steps_ingested
@@ -501,7 +478,6 @@ def learner_loop(shared_policy, exp_queue, device, cfg, actor_processes):
 
     try:
         while not should_stop():
-            # 1. Unroll the queue chunks into the Replay Buffer
             chunks_unrolled = 0
             max_chunks_per_step = 40
             while not exp_queue.empty() and chunks_unrolled < max_chunks_per_step:
@@ -512,7 +488,7 @@ def learner_loop(shared_policy, exp_queue, device, cfg, actor_processes):
                         total_steps_ingested += 1
                     chunks_unrolled += 1
                 except Exception:
-                    break  # Queue empty or busy
+                    break
 
             if exp_queue.empty() and not any(p.is_alive() for p in actor_processes):
                 print("\n[Learner] All actors have finished their episodes and queue is drained. Finishing training...")
@@ -522,14 +498,10 @@ def learner_loop(shared_policy, exp_queue, device, cfg, actor_processes):
                 transitions = memory.sample(cfg.BATCH_SIZE)
                 batch_state, batch_action, batch_reward, batch_next_state, batch_done = zip(*transitions)
 
-                # 1. Find Max Dimensions for Current Batch
                 max_nodes = max(state[0].shape[0] for state in batch_state)
                 max_edges = max(state[1].shape[1] for state in batch_state)
-
                 max_next_nodes = max(n_state[0].shape[0] for n_state in batch_next_state)
                 max_next_edges = max(n_state[1].shape[1] for n_state in batch_next_state)
-
-                # 2. Dynamically infer feature dimension
                 feature_dim = batch_state[0][0].shape[1]
 
                 batched_s_nodes = torch.zeros((cfg.BATCH_SIZE, max_nodes, feature_dim), device=device)
@@ -540,66 +512,78 @@ def learner_loop(shared_policy, exp_queue, device, cfg, actor_processes):
                 batched_ns_H = torch.zeros((cfg.BATCH_SIZE, max_next_nodes, max_next_edges), device=device)
                 next_node_masks = torch.zeros((cfg.BATCH_SIZE, max_next_nodes), dtype=torch.bool, device=device)
 
+                batched_h = torch.zeros((cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM), device=device)
+                batched_c = torch.zeros((cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM), device=device)
+                batched_nh = torch.zeros((cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM), device=device)
+                batched_nc = torch.zeros((cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM), device=device)
+
                 for i in range(cfg.BATCH_SIZE):
-                    s_nodes, s_H = batch_state[i]
+                    s_nodes, s_H = batch_state[i][0], batch_state[i][1]
                     n_nodes, n_edges = s_H.shape
                     batched_s_nodes[i, :n_nodes, :] = s_nodes.to(device)
                     batched_s_H[i, :n_nodes, :n_edges] = s_H.to(device)
                     node_masks[i, :n_nodes] = True
 
-                    # Next State
-                    ns_nodes, ns_H = batch_next_state[i]
+                    ns_nodes, ns_H = batch_next_state[i][0], batch_next_state[i][1]
                     nn_nodes, nn_edges = ns_H.shape
                     batched_ns_nodes[i, :nn_nodes, :] = ns_nodes.to(device)
                     batched_ns_H[i, :nn_nodes, :nn_edges] = ns_H.to(device)
                     next_node_masks[i, :nn_nodes] = True
 
-                dummy_h = (torch.zeros(cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device),
-                           torch.zeros(cfg.BATCH_SIZE, cfg.LSTM_HIDDEN_DIM, device=device))
+                    # Load stored recurrent states (backwards-compatible with old 2-tuple checkpoints)
+                    if len(batch_state[i]) == 3:
+                        batched_h[i] = batch_state[i][2][0].squeeze(0).to(device)
+                        batched_c[i] = batch_state[i][2][1].squeeze(0).to(device)
+                        batched_nh[i] = batch_next_state[i][2][0].squeeze(0).to(device)
+                        batched_nc[i] = batch_next_state[i][2][1].squeeze(0).to(device)
 
-                # 5. ONE MASSIVE FORWARD PASS
-                q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(batched_s_nodes, batched_s_H, dummy_h, mask=node_masks)
+                batch_arange = torch.arange(cfg.BATCH_SIZE, device=device)
 
+                # Forward pass with stored LSTM hidden states
+                q_act_v, q_item_v, q_rot_v, q_map_v, _ = policy_net(
+                    batched_s_nodes, batched_s_H, (batched_h, batched_c), mask=node_masks
+                )
+
+                # Double DQN Target Calculation
                 with torch.no_grad():
-                    nq_act, nq_item, nq_rot, nq_map, _ = target_net(batched_ns_nodes, batched_ns_H, dummy_h,
-                                                                    mask=next_node_masks)
+                    # 1. Online policy_net selects greedy next actions
+                    p_nq_act, p_nq_item, p_nq_rot, p_nq_map, _ = policy_net(
+                        batched_ns_nodes, batched_ns_H, (batched_nh, batched_nc), mask=next_node_masks
+                    )
+                    next_act_idx = p_nq_act.argmax(dim=1)
+                    next_item_idx = p_nq_item.argmax(dim=1)
+                    next_rot_idx = p_nq_rot.argmax(dim=1)
+                    next_map_idx = p_nq_map.view(cfg.BATCH_SIZE, -1).argmax(dim=1)
 
-                    # Determine which action the target network would greedily pick next
-                    next_act_idx = nq_act.argmax(dim=1)
-                    next_uses_item = ((next_act_idx == 2) | (next_act_idx == 3) | (next_act_idx == 4) | (
-                                next_act_idx == 6)).float()
+                    # 2. Target network evaluates the actions selected by policy_net
+                    nq_act, nq_item, nq_rot, nq_map, _ = target_net(
+                        batched_ns_nodes, batched_ns_H, (batched_nh, batched_nc), mask=next_node_masks
+                    )
+
+                    next_uses_item = ((next_act_idx == 2) | (next_act_idx == 3) | (next_act_idx == 4) | (next_act_idx == 6)).float()
                     next_uses_rot = (next_act_idx == 3).float()
                     next_uses_map = (next_act_idx != 2).float()
 
-                    max_nq_act = nq_act.max(dim=1)[0]
-                    max_nq_item = nq_item.max(dim=1)[0] * next_uses_item
-                    max_nq_rot = nq_rot.max(dim=1)[0] * next_uses_rot
-                    max_nq_map = nq_map.view(cfg.BATCH_SIZE, -1).max(dim=1)[0] * next_uses_map
+                    max_nq_act = nq_act[batch_arange, next_act_idx]
+                    max_nq_item = nq_item[batch_arange, next_item_idx] * next_uses_item
+                    max_nq_rot = nq_rot[batch_arange, next_rot_idx] * next_uses_rot
+                    max_nq_map = nq_map.view(cfg.BATCH_SIZE, -1)[batch_arange, next_map_idx] * next_uses_map
 
-                    # Divide only by the number of active heads for that next action
                     active_heads = 1.0 + next_uses_item + next_uses_rot + next_uses_map
                     max_q = (max_nq_act + max_nq_item + max_nq_rot + max_nq_map) / active_heads
 
                     r_tensor = torch.tensor(batch_reward, dtype=torch.float32, device=device)
                     d_tensor = torch.tensor(batch_done, dtype=torch.float32, device=device)
-
                     target_vals = r_tensor + cfg.GAMMA * max_q * (1.0 - d_tensor)
 
-                # 6. VECTORIZED MASKED LOSS CALCULATION
                 actions_t = torch.tensor(batch_action, dtype=torch.long, device=device)
-                act_idx = actions_t[:, 0]
-                item_idx = actions_t[:, 1]
-                rot_idx = actions_t[:, 2]
-                map_idx = actions_t[:, 3]
-
-                batch_arange = torch.arange(cfg.BATCH_SIZE, device=device)
+                act_idx, item_idx, rot_idx, map_idx = actions_t[:, 0], actions_t[:, 1], actions_t[:, 2], actions_t[:, 3]
 
                 chosen_q_act = q_act_v[batch_arange, act_idx]
                 chosen_q_item = q_item_v[batch_arange, item_idx]
                 chosen_q_rot = q_rot_v[batch_arange, rot_idx]
                 chosen_q_map = q_map_v.view(cfg.BATCH_SIZE, -1)[batch_arange, map_idx]
 
-                # Mask out heads that had no effect on the executed action
                 uses_item = ((act_idx == 2) | (act_idx == 3) | (act_idx == 4) | (act_idx == 6)).float()
                 uses_rot = (act_idx == 3).float()
                 uses_map = (act_idx != 2).float()
@@ -611,7 +595,6 @@ def learner_loop(shared_policy, exp_queue, device, cfg, actor_processes):
 
                 loss = loss_act + loss_item + loss_rot + loss_map
 
-                # 7. BACKPROPAGATION
                 optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
@@ -620,14 +603,11 @@ def learner_loop(shared_policy, exp_queue, device, cfg, actor_processes):
                 updates_done += 1
                 current_loss = loss.item()
 
-                # 8. TARGET UPDATE & SYNC
                 if updates_done % cfg.TARGET_UPDATE == 0:
                     target_net.load_state_dict(policy_net.state_dict())
                     shared_policy.load_state_dict({k: v.cpu() for k, v in policy_net.state_dict().items()})
-                    print(
-                        f"[Learner] Target updated & weights synced to CPU at {updates_done} updates. Loss: {current_loss:.4f}")
+                    print(f"[Learner] Target updated & weights synced to CPU at {updates_done} updates. Loss: {current_loss:.4f}")
 
-                    # 9. DASHBOARD UPDATE
                     current_time = time.time()
                     if current_time - last_json_update > cfg.UPDATE_INTERVAL_SEC:
                         elapsed_interval = current_time - last_json_update
@@ -661,14 +641,11 @@ def learner_loop(shared_policy, exp_queue, device, cfg, actor_processes):
                             "hyperparameters": hyperparameters,
                             "num_actors": cfg.NUM_ACTORS
                         }
-
                         dump_dashboard_state(state_dict)
-
                         last_json_update = current_time
                         last_updates_count = updates_done
                         last_steps_ingested = total_steps_ingested
 
-                    # 10. ROLLING AUTOSAVE & WEIGHTS EXPORT (Once every 30 minutes)
                 if time.time() - last_autosave_time >= autosave_interval:
                     save_checkpoint(
                         cfg.AUTOSAVE_PATH, policy_net, target_net, optimizer,
@@ -676,11 +653,9 @@ def learner_loop(shared_policy, exp_queue, device, cfg, actor_processes):
                     )
                     last_autosave_time = time.time()
             else:
-                # Prevent 100% CPU spin-wait while waiting for initial chunks from actors
                 time.sleep(0.05)
 
     finally:
-        # Save final checkpoint and weights when training stops or Ctrl+C is pressed
         if updates_done > 0:
             print("\n[Learner] Shutting down — saving final rolling checkpoint and weights...")
             save_checkpoint(

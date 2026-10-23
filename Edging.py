@@ -501,9 +501,13 @@ def find_ground_pipe_pipe_edges(machine_list):
 
 
 # MAIN FUNCTION
-def translateEntitesToEdges(reciever) -> list[Any] | None:
-    # 1. Fetch Data
-    machines = reciever.scan_entities_boundingboxes()
+# Replace translateEntitesToEdges header in Edging.py (Lines 442-447)
+def translateEntitesToEdges(reciever, raw_entities=None) -> list[Any] | None:
+    # 1. Reuse raw_entities if they already contain selection_box; otherwise query RCON
+    if raw_entities and len(raw_entities) > 0 and 'selection_box' in raw_entities[0]:
+        machines = raw_entities
+    else:
+        machines = reciever.scan_entities_boundingboxes()
     if not machines:
         #print("No entities found.")
         return []

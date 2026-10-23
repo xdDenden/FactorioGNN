@@ -158,36 +158,21 @@ def is_player_near_ore_patch_center(px, py, patches, distance_threshold=7.0):
 
 
 # CORE MASKING LOGIC
+
+_SHARED_DETECTOR = OrePatchDetector(ore_data=[])
+#TODO: Add comments
 def get_action_masks(
         entities: List[Dict],
         player_info: Dict,
         inventory: Dict[str, int],
-        available_items: List[str],  # <--- CHANGED: Now takes list of unlocked items
+        available_items: List[str],
         bounds: Tuple[int, int, int, int],
         grid_steps: int = 17,
         patches: Optional[List[Dict]] = None,
         move_state: Optional[Dict] = None
 ):
-    """
-    Generates bitmasks to filter illegal actions.
-
-    Args:
-        entities: List of entity dicts (from environment.py/parsers.py)
-        player_info: Dict containing 'pos' {'x', 'y'}
-        inventory: Dict of {item_name: count}
-        science_level: (int) Placeholder for tech availability
-        bounds: (min_x, max_x, min_y, max_y) current observation window
-
-    Returns:
-        action_mask: np.array [num_actions] (1=Legal, 0=Illegal)
-        item_mask:   np.array [num_actions, num_items]
-                     (Rows correspond to actions. E.g., item_mask[CRAFT] shows valid recipes)
-        spatial_mask: np.array [num_actions, grid_steps * grid_steps]
-                     (Rows correspond to actions. E.g., spatial_mask[MINE] shows tiles with ore)
-    """
-
     num_actions = len(ACTION_MAP)
-    num_items = len(ITEM_MAP)
+    num_items = max(ITEM_MAP.values()) + 1
     grid_size = grid_steps * grid_steps
 
     # Initialize masks (Default to 0/False)
@@ -212,69 +197,25 @@ def get_action_masks(
     # Map entities to grid
     for e in entities:
         gx, gy = world_to_grid(e['x'], e['y'], bounds, grid_steps)
-        entity_grid[gy, gx] = True  # Mark occupied
-
-        # Check if entity is in INSERT_MAP (using machine_name or name)
+        entity_grid[gy, gx] = True
         name = e.get('machine_name', e.get('name', ''))
         if name in INSERT_MAP:
             insertable_grid[gy, gx] = True
 
-    # Flatten grid for the mask (Row-major order to match rconToGNN decoding)
-    # Note: rconToGNN uses: y_grid_idx = flat // 17, x = flat % 17
     flat_entity_mask = entity_grid.flatten()
     flat_empty_mask = ~flat_entity_mask
     flat_insertable_mask = insertable_grid.flatten()
 
     # Pre-calculate Grid-to-World steps
     min_x, max_x, min_y, max_y = bounds
-    step_x = (max_x - min_x) / grid_steps
-    step_y = (max_y - min_y) / grid_steps
-    flat_insertable_mask = insertable_grid.flatten()
+    step_x = (max_x - min_x) / grid_steps if max_x != min_x else 1.0
+    step_y = (max_y - min_y) / grid_steps if max_y != min_y else 1.0
 
-    # Load Patches (if not provided)
-    loaded_patches = []
-    if patches is not None:
-        loaded_patches = patches
-    else:
-        try:
-            with open('patches.json', 'r') as f:
-                data = json.load(f)
-                # Reconstruct Polygon objects from boundary points
-                for p in data:
-                    if 'boundary' in p:
-                        p['polygon'] = Polygon(p['boundary'])
-                        loaded_patches.append(p)
-        except FileNotFoundError:
-            # print("Warning: patches.json not found.")
-            pass
-        except Exception as e:
-            print(f"Error loading patches: {e}")
+    loaded_patches = patches if patches is not None else []
 
-    # Load Ore Map for Crude Oil
-    crude_oil_coords = []
-    try:
-        with open('ore_map.json', 'r') as f:
-            ore_data = json.load(f)
-            # Filter specifically for crude-oil coordinates
-            crude_oil_coords = [item for item in ore_data if item.get('name') == 'crude-oil']
-    except FileNotFoundError:
-        pass
-    except Exception as e:
-        print(f"Error loading ore_map.json: {e}")
-
-    # Detector instance
-    detector = OrePatchDetector(ore_data=[])
-
-    # Pre-calculate Reach Mask
-    # Which grid cells are reachable?
     reach_grid = np.zeros((grid_steps, grid_steps), dtype=bool)
-    min_x, max_x, min_y, max_y = bounds
-    step_x = (max_x - min_x) / grid_steps
-    step_y = (max_y - min_y) / grid_steps
-
     for gy in range(grid_steps):
         for gx in range(grid_steps):
-            # Approx world pos of this grid cell
             wx = min_x + (gx * step_x)
             wy = min_y + (gy * step_y)
             if check_reach(px, py, wx, wy, max_dist=30):
@@ -282,76 +223,36 @@ def get_action_masks(
 
     flat_reach_mask = reach_grid.flatten()
 
-    # 0. ACTION: NONE (0)
-    # action_mask[0] = 1.0  # Always legal to do nothing
-    # item_mask[0, :] = 1.0  # Args irrelevant
-    # spatial_mask[0, :] = 1.0
-
     # 0. ACTION: MOVE_TO (0)
-    # Always legal to try moving (pathfinding handles the rest)
-    if move_state and move_state['active']:
-        action_mask[0] = 0.0
-    else:
-        action_mask[0] = 1.0
-
-    item_mask[0, :] = 0.0
+    action_mask[0] = 0.0 if (move_state and move_state.get('active')) else 1.0
     item_mask[0, 0] = 1.0
     spatial_mask[0, :] = 1.0
 
     # 1. ACTION: MINE (1)
     can_mine_any = False
-
-    for gy in range(grid_steps):
-        for gx in range(grid_steps):
-            flat_idx = gy * grid_steps + gx
-
-            # 1. Approximate World Position (center of the grid tile)
-            wx = min_x + (gx * step_x) + (step_x / 2)
-            wy = min_y + (gy * step_y) + (step_y / 2)
-
-            # 2. Check Reach
-            if not check_reach(px, py, wx, wy, max_dist=30):
-                continue
-
-            # 3. Check for valid Ore Patch (excluding crude-oil)
-            # This relies on the internal structure of patches.json being compatible
-            # with OrePatchDetector and Shapely geometry objects being loaded correctly
-
-            is_mineable = False
-            if loaded_patches:
-                p_list = detector.is_position_in_patch(wx, wy, patches=loaded_patches)
-                for p in p_list:
-                    if p['ore_type'] != 'crude-oil':  # Cannot hand-mine oil
-                        is_mineable = True
-                        break
-
-            if is_mineable:
-                spatial_mask[1, flat_idx] = 1.0
-                can_mine_any = True
+    if loaded_patches:
+        for gy in range(grid_steps):
+            for gx in range(grid_steps):
+                flat_idx = gy * grid_steps + gx
+                wx = min_x + (gx * step_x) + (step_x / 2)
+                wy = min_y + (gy * step_y) + (step_y / 2)
+                if not check_reach(px, py, wx, wy, max_dist=30):
+                    continue
+                p_list = _SHARED_DETECTOR.is_position_in_patch(wx, wy, patches=loaded_patches)
+                if any(p['ore_type'] != 'crude-oil' for p in p_list):
+                    spatial_mask[1, flat_idx] = 1.0
+                    can_mine_any = True
 
     if can_mine_any:
         action_mask[1] = 1.0
-
-    item_mask[1, :] = 1.0  # Item arg irrelevant for mining
+    item_mask[1, :] = 1.0
 
     # 2. ACTION: CRAFT (2)
-    # Legal IF: Player has ingredients for at least one recipe
-    # TODO: Consider which buildings can be placed on which surface (mining drills need ore etc)
     can_craft_any = False
-
     for item_name, recipe_data in RECIPES.items():
-        # 1. RESEARCH CHECK
         if item_name not in unlocked_set:
             continue
-
-        # 2. INGREDIENT CHECK
-        craftable = True
-        for ingredient, required_qty in recipe_data.items():
-            if inventory.get(ingredient, 0) < required_qty:
-                craftable = False
-                break
-
-        if craftable:
+        if all(inventory.get(ing, 0) >= qty for ing, qty in recipe_data.items()):
             item_id = ITEM_MAP.get(item_name, 0)
             if item_id > 0:
                 item_mask[2, item_id] = 1.0
@@ -359,89 +260,66 @@ def get_action_masks(
 
     if can_craft_any:
         action_mask[2] = 1.0
-        spatial_mask[2, :] = 1.0  # Location irrelevant for crafting
+        spatial_mask[2, :] = 1.0
 
     # 3. ACTION: BUILD (3)
-    # Legal IF: Player has the item AND target is empty AND within reach
-    # SPECIAL CASE: Mining drills require player near ore patch center AND build location in ore patch
-    can_build_any = False
-
-    # Check if player is near any ore patch center (for miner placement eligibility)
-    player_near_ore_center = is_player_near_ore_patch_center(px, py, loaded_patches, distance_threshold=7.0)
-
-    # Simple check for oil proximity (iterating patches)
-    player_near_oil = False
-    for p in loaded_patches:
-        if p['ore_type'] == 'crude-oil':
-            cx, cy = p['center']
-            if math.sqrt((px-cx)**2 + (py-cy)**2) < 7.0:
-                player_near_oil = True
-            break
-
-    # 1. Check Inventory for buildable items
-    for item_name, count in inventory.items():
-        if count > 0:
-            item_id = MACHINE_NAME_MAP.get(item_name, 0)
-            # Simple check: is it in our ID map? (Assumes map implies buildable)
-            if item_id > 0:
-                # Special handling for mining drills
-                if item_name in MINING_DRILLS:
-                    # Only enable miner in item mask if player is near ore patch center
-                    if player_near_ore_center:
-                        item_mask[3, item_id] = 1.0
-                        can_build_any = True
-                elif item_name in OIL_EXTRACTORS:
-                    # Only enable pumpjack if player is near crude oil (within 4 tiles)
-                    if player_near_oil:
-                        item_mask[3, item_id] = 1.0
-                        can_build_any = True
-                else:
-                    # Regular buildings can always be placed (subject to spatial constraints)
-                    item_mask[3, item_id] = 1.0
-                    can_build_any = True
-
-    # 2. Check Spatial (Empty + Reach)
-    # For mining drills: Also check if location is within an ore patch
     valid_build_locs = flat_empty_mask & flat_reach_mask
-
-    # Create separate spatial masks for miners vs regular buildings vs pumpjacks
     miner_spatial_mask = np.zeros(grid_size, dtype=bool)
     pumpjack_spatial_mask = np.zeros(grid_size, dtype=bool)
     regular_spatial_mask = valid_build_locs.copy()
 
-    # Pre-calc Has-Items to save compute
+    player_near_ore_center = is_player_near_ore_patch_center(px, py, loaded_patches, distance_threshold=7.0)
+    player_near_oil = any(
+        p['ore_type'] == 'crude-oil' and math.sqrt((px - p['center'][0]) ** 2 + (py - p['center'][1]) ** 2) < 7.0
+        for p in loaded_patches
+    )
+
     has_miner = any(inventory.get(n,0)>0 for n in MINING_DRILLS)
     has_pumpjack = any(inventory.get(n,0)>0 for n in OIL_EXTRACTORS)
-    has_regular = any(inventory.get(n,0)>0 and n not in MINING_DRILLS and n not in OIL_EXTRACTORS and MACHINE_NAME_MAP.get(n,0)>0 for n in inventory)
 
-    # Fill Spatial Detail if we have the items
     if (has_miner and player_near_ore_center) or (has_pumpjack and player_near_oil):
         for gy in range(grid_steps):
             for gx in range(grid_steps):
                 flat_idx = gy * grid_steps + gx
-
-                # Must be empty and reachable
                 if not valid_build_locs[flat_idx]:
                     continue
-
-                # Calculate world position
                 wx = min_x + (gx * step_x) + (step_x / 2)
                 wy = min_y + (gy * step_y) + (step_y / 2)
-
-                # Check placement validity
-                p_list = detector.is_position_in_patch(wx, wy, patches=loaded_patches)
+                p_list = _SHARED_DETECTOR.is_position_in_patch(wx, wy, patches=loaded_patches)
                 for p in p_list:
                     if p['ore_type'] == 'crude-oil' and has_pumpjack:
                         pumpjack_spatial_mask[flat_idx] = True
                     elif p['ore_type'] != 'crude-oil' and has_miner:
                         miner_spatial_mask[flat_idx] = True
 
+    build_spatial_by_item: Dict[int, np.ndarray] = {}
     combined_spatial = np.zeros(grid_size, dtype=bool)
-    if has_miner: combined_spatial |= miner_spatial_mask
-    if has_pumpjack: combined_spatial |= pumpjack_spatial_mask
-    if has_regular: combined_spatial |= regular_spatial_mask
 
-    if can_build_any and np.any(combined_spatial):
+    for item_name, count in inventory.items():
+        if count <= 0 or item_name not in MACHINE_NAME_MAP:
+            continue
+        # Index using ITEM_MAP so it aligns with the network's item_head and ID_TO_ITEM!
+        item_id = ITEM_MAP.get(item_name, 0)
+        if item_id <= 0:
+            continue
+
+        if item_name in MINING_DRILLS:
+            if player_near_ore_center and np.any(miner_spatial_mask):
+                item_mask[3, item_id] = 1.0
+                build_spatial_by_item[item_id] = miner_spatial_mask.astype(np.float32)
+                combined_spatial |= miner_spatial_mask
+        elif item_name in OIL_EXTRACTORS:
+            if player_near_oil and np.any(pumpjack_spatial_mask):
+                item_mask[3, item_id] = 1.0
+                build_spatial_by_item[item_id] = pumpjack_spatial_mask.astype(np.float32)
+                combined_spatial |= pumpjack_spatial_mask
+        else:
+            if np.any(regular_spatial_mask):
+                item_mask[3, item_id] = 1.0
+                build_spatial_by_item[item_id] = regular_spatial_mask.astype(np.float32)
+                combined_spatial |= regular_spatial_mask
+
+    if np.any(item_mask[3]) and np.any(combined_spatial):
         action_mask[3] = 1.0
         spatial_mask[3, :] = combined_spatial.astype(np.float32)
 
@@ -457,31 +335,25 @@ def get_action_masks(
         for item_name, count in inventory.items():
             if count > 0:
                 iid = ITEM_MAP.get(item_name, 0)
-                item_mask[4, iid] = 1.0
+                if iid > 0:
+                    item_mask[4, iid] = 1.0
 
     # 5. ACTION: TAKE (5)
     # Legal IF: Entity at target (to take from)
     if np.any(valid_insert_targets):
         action_mask[5] = 1.0
         spatial_mask[5, :] = valid_insert_targets.astype(np.float32)
-        item_mask[5, :] = 1.0  # Item arg irrelevant
+        item_mask[5, :] = 1.0
 
     # 6. ACTION: CHANGE_RECIPE (6)
     # Legal IF: Entity at target
     if np.any(valid_insert_targets):
         action_mask[6] = 1.0
         spatial_mask[6, :] = valid_insert_targets.astype(np.float32)
-
-        # Iterate over known recipes
         for name in RECIPES:
-            # 1. RESEARCH CHECK
-            if name not in unlocked_set:
-                continue
-
-            # 2. Map to ID
-            # Assuming the Network Output for "Item" aligns with ITEM_MAP
-            iid = ITEM_MAP.get(name, 0)
+            if name in unlocked_set:
+                iid = ITEM_MAP.get(name, 0)
             if iid > 0:
                 item_mask[6, iid] = 1.0
 
-    return action_mask, item_mask, spatial_mask
+    return action_mask, item_mask, spatial_mask, build_spatial_by_item

@@ -29,6 +29,14 @@ if "ngrok_url" not in st.session_state:
 
 
 # --- HELPER FUNCTIONS ---
+def is_docker_running() -> bool:
+    try:
+        client = docker.from_env()
+        client.ping()
+        return True
+    except Exception:
+        return False
+
 def format_time(seconds):
     return str(datetime.timedelta(seconds=int(seconds)))
 
@@ -181,9 +189,16 @@ def fetch_ngrok_public_url():
 
 # Load current config
 cfg = Config()
+docker_ok = is_docker_running()
 
+if not docker_ok:
+    st.error(
+        "**Docker is not running or cannot be reached!** "
+        "Please start Docker Desktop (Windows/macOS) or the `docker` service (Linux) "
+        "before launching training or inference.",
+    )
 # ==========================================
-# SIDEBAR: PROCESS & NGROK CONTROL CENTER
+# SIDEBAR
 # ==========================================
 with st.sidebar:
     st.title("Control Center")
@@ -194,13 +209,13 @@ with st.sidebar:
 
     col_t1, col_t2 = st.columns(2)
     with col_t1:
-        if st.button("▶️ Start Train", disabled=train_running, width="stretch", type="primary"):
+        if st.button("▶️ Start Train", disabled=(train_running or not docker_ok), width="stretch", type="primary"):
             cmd = get_launch_cmd("train")
             pid = start_background_process(cmd, TRAIN_PID_FILE, STOP_TRAIN_FILE)
             st.toast(f"Started train_dqn (PID {pid})!", icon="🚀")
             st.rerun()
     with col_t2:
-        if st.button("⏹️ Stop Train", disabled=not train_running, width="stretch"):
+        if st.button("⏹️ Stop Train", disabled=(not train_running), width="stretch"):
             with st.spinner("Stopping actors and cleaning up Factorio containers..."):
                 stop_background_process(TRAIN_PID_FILE, STOP_TRAIN_FILE, cleanup_containers_prefix="factorio_actor_")
             st.toast("Stopped train_dqn and cleaned up containers.", icon="🛑")

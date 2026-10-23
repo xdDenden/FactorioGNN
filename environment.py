@@ -140,13 +140,13 @@ class FactorioEnv:
 
     def get_observation(self, scan_entities=True, char_info=True):
         # 1. Fetch Data
-        if scan_entities:
+        if scan_entities or not hasattr(self, '_last_raw_entities'):
             raw_entities = self.receiver.scan_entities()
             self._last_raw_entities = raw_entities
         else:
             raw_entities = self._last_raw_entities
 
-        if char_info:
+        if char_info or not hasattr(self, '_last_raw_player'):
             raw_player = self.receiver.char_info()
             self._last_raw_player = raw_player
         else:
@@ -173,17 +173,19 @@ class FactorioEnv:
         grid_entities = all_entities + [player_ent]
         H_grid = create_grid_hypergraph(grid_entities, grid_size=10)
 
-        # Functional (Edges)
-        # Note: Edges usually only exist between machines, not ore patches
-        functional_edges = Edging.translateEntitesToEdges(self.receiver)
-        self._current_edge_count = self._count_meaningful_edges(functional_edges)
+        # 5. Functional Hypergraph (only query RCON & rebuild when entities actually changed)
+        if scan_entities or not hasattr(self, '_last_H_func') or self._last_H_func.shape[0] != total_nodes:
+            functional_edges = Edging.translateEntitesToEdges(self.receiver, raw_entities=raw_entities)
+            self._current_edge_count = self._count_meaningful_edges(functional_edges)
 
-        # No zero row concatenation (dont ask lol)
-        # We pass 'total_nodes' (which includes the player) directly to the creator
-        # This ensures the matrix is initialized to the correct full size (Machines + Player)
-        H_func = create_functional_hypergraph(self._last_raw_entities, functional_edges, total_nodes=total_nodes)
-        # Combine
-        # Ensure grid and func graphs match in node dimension
+            # No zero row concatenation (dont ask lol)
+            # We pass 'total_nodes' (which includes the player) directly to the creator
+            # This ensures the matrix is initialized to the correct full size (Machines + Player)
+            H_func = create_functional_hypergraph(self._last_raw_entities, functional_edges, total_nodes=total_nodes)
+            self._last_H_func = H_func
+        else:
+            H_func = self._last_H_func
+
         if H_grid.shape[0] != H_func.shape[0]:
              # This print helps debug if it happens again
              print(f"Shape Mismatch! Grid: {H_grid.shape}, Func: {H_func.shape}")
